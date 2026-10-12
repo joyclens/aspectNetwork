@@ -135,7 +135,7 @@ class Events(commands.Cog):
                         "We are pleased to have you join our journey "
                         "to become *Your Ideal Connection*.\n"
                         "-# And don't forget to check out our "
-                        "**[marketplace](https://discordapp.com/channels/1529135675318866020/1529142741110358027)**"
+                        "**[marketplace](https://discordapp.com/channels/1559284770440216639/1529142741110358027)**"
                     ),
                     discord.ui.ActionRow(
                         discord.ui.Button(
@@ -146,7 +146,7 @@ class Events(commands.Cog):
                         discord.ui.Button(
                             label="View our Dashboard",
                             style=discord.ButtonStyle.link,
-                            url="https://discordapp.com/channels/1529135675318866020/1529141669340123257",
+                            url="https://discordapp.com/channels/1559284770440216639/1529141669340123257",
                         ),
                     ),
                 ),
