@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+from urllib.parse import urlparse
+
+import aiohttp
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+_SID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+
+
+class DockError(Exception):
+    def __init__(self, status: int, retry_after: float | None = None) -> None:
+        self.status = status
+        self.retry_after = retry_after
+        super().__init__(f"dock status {status}")
+
+
+class SessionCreated(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    sid: str
+    verify_url: str = Field(alias="verifyUrl")
+    expires_at: datetime = Field(alias="expiresAt")
+
+
+class SessionResult(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    discord_id: str | None = Field(default=None, alias="discordId")
+    roblox_id: str | None = Field(default=None, alias="robloxId")
+
+
+class SessionState(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    status: str | None = None
+    result: SessionResult | None = None
+
+
+class Dock:
+    def __init__(self, api_key: str, pid: str) -> None:
+        self._api_key = api_key
+        self._pid = pid
+        self._session: aiohttp.ClientSession | None = None
+
+    def __repr__(self) -> str:
+        return "Dock()"
+
+    async def start(self) -> None:
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=40),
+                headers={"User-Agent": "Aspect/0.1"},
+            )
+
+    async def close(self) -> None:
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+
+    async def create_session(self, client_id: str, guild_id: int) -> SessionCreated:
+        payload = await self._request(
+            "POST",
+            "https://api.docksys.xyz/api/v1/verify/session",
+            json_body={"pid": self._pid, "clientId": client_id, "guildId": str(guild_id)},
+        )
+        data = payload.get("data")
+        try:
+            return SessionCreated.model_validate(data)
+        except ValidationError as exc:
+            raise DockError(0) from exc
+
+    async def session_state(self, sid: str, wait: int = 25) -> SessionState:
+        if not sid or any(char not in _SID_CHARS for char in sid):
+            raise DockError(0)
+        payload = await self._request(
+            "GET",
+            f"https://api.docksys.xyz/api/v1/verify/session/{sid}",
+            params={"wait": str(wait)},
+        )
+        data = payload.get("data")
+        try:
+            return SessionState.model_validate(data)
+        except ValidationError as exc:
+            raise DockError(0) from exc
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or (parsed.hostname or "").lower() != "api.docksys.xyz":
+            raise DockError(0)
+        if parsed.username or parsed.password:
+            raise DockError(0)
+        session = self._session
+        if session is None or session.closed:
+            raise DockError(0)
+        try:
+            async with session.request(
+                method,
+                url,
+                json=json_body,
+                params=params,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                allow_redirects=False,
+            ) as response:
+                body = await _json_or_empty(response)
+                if response.status == 429:
+                    retry = body.get("retryAfter")
+                    delay = float(retry) if isinstance(retry, int | float) else None
+                    raise DockError(429, delay)
+                if response.status >= 400:
+                    raise DockError(response.status)
+                return body
+        except aiohttp.ClientError as exc:
+            raise DockError(0) from exc
+        except TimeoutError as exc:
+            raise DockError(0) from exc
+
+
+async def _json_or_empty(response: aiohttp.ClientResponse) -> dict[str, Any]:
+    try:
+        payload: Any = await response.json(content_type=None)
+    except (aiohttp.ContentTypeError, ValueError) as exc:
+        raise DockError(response.status or 0) from exc
+    if isinstance(payload, dict):
+        return payload
+    raise DockError(response.status or 0)

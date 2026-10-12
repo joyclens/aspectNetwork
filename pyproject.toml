@@ -1,0 +1,61 @@
+[project]
+name = "aspect"
+version = "0.1.0"
+description = "Aspect Discord bot"
+requires-python = ">=3.11"
+dependencies = [
+    "discord.py>=2.4,<3",
+    "asyncpg>=0.30",
+    "aiohttp>=3.10",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.4",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bot*"]
+
+[tool.setuptools.package-data]
+bot = ["core/schema.sql", "assets/ascii/banner.txt"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["bot"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["bot"]
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["bot.core.database"]
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

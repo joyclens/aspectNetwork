@@ -1,0 +1,12 @@
+${accent}
+     _                      _
+    / \   ___ _ __   ___  ___| |_
+   / _ \ / __| '_ \ / _ \/ __| __|
+  / ___ \ \__ \ |_) |  __/ (__| |_
+ /_/   \_\___/ .__/ \___|\___|\__|
+             |_|
+${reset}${bold_white}Aspect${reset} ${aspect}
+Version     ${version}
+Users       ${users}
+Extensions  ${extensions}   Commands ${commands}
+Database    ${db}
