@@ -10,9 +10,19 @@ from discord.ext import commands
 
 from bot.core.bot import Aspect
 from bot.services.dock import DockError, SessionCreated
+from bot.services.roblox import RobloxError
 from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")
+
+
+def _emoji_id(token: str) -> int | None:
+    if not (token.startswith("<") and token.endswith(">") and token.count(":") == 2):
+        return None
+    raw = token[1:-1].rsplit(":", 1)[-1]
+    if not raw.isdigit() or int(raw) < 1:
+        return None
+    return int(raw)
 
 
 class VerifyButton(discord.ui.Button[Any]):
@@ -64,11 +74,30 @@ class VerificationPanel(discord.ui.LayoutView):
         )
 
 
+class _Continue(discord.ui.Button[Any]):
+    def __init__(self, roblox_id: int, username: str, emoji: str) -> None:
+        super().__init__(
+            label="Continue",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"verifyContinue:{roblox_id}",
+        )
+        self.roblox_id = roblox_id
+        self.username = username
+        self.headshot = emoji
+
+    async def callback(self, interaction: discord.Interaction[Any]) -> None:
+        client = interaction.client
+        cog = client.get_cog("Events") if isinstance(client, Aspect) else None
+        if isinstance(cog, Events):
+            await cog.confirm(interaction, self.roblox_id, self.username, self.headshot)
+
+
 class Events(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
         self._posted = False
         self._tasks: set[asyncio.Task[None]] = set()
+        self._emoji_tasks: dict[int, asyncio.Task[None]] = {}
 
     async def cog_load(self) -> None:
         self.bot.add_view(VerificationPanel())
@@ -76,6 +105,11 @@ class Events(commands.Cog):
     async def cog_unload(self) -> None:
         for task in self._tasks:
             task.cancel()
+        pending = list(self._emoji_tasks)
+        for task in self._emoji_tasks.values():
+            task.cancel()
+        for emoji_id in pending:
+            await self._delete_emoji(emoji_id)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
@@ -137,13 +171,25 @@ class Events(commands.Cog):
         if interaction.guild_id != self.bot.settings.discord_guild_id or interaction.user.bot:
             return
         dock = self.bot.dock
-        if dock is None or interaction.guild_id is None:
+        if dock is None or self.bot.roblox is None or interaction.guild_id is None:
             await interaction.response.send_message(
                 view=container_view(discord.ui.TextDisplay("Verification is not ready.")),
                 ephemeral=True,
             )
             return
         await interaction.response.defer(ephemeral=True)
+        try:
+            linked = await dock.linked_roblox(interaction.user.id, interaction.guild_id)
+        except DockError as exc:
+            logger.warning("Dock lookup failed status=%s", exc.status)
+            await interaction.followup.send(
+                view=container_view(discord.ui.TextDisplay("Verification could not be started.")),
+                ephemeral=True,
+            )
+            return
+        if linked is not None:
+            await self._already(interaction, int(linked))
+            return
         try:
             session = await dock.create_session(str(interaction.user.id), interaction.guild_id)
         except DockError as exc:
@@ -153,7 +199,7 @@ class Events(commands.Cog):
                 ephemeral=True,
             )
             return
-        await interaction.followup.send(
+        message = await interaction.followup.send(
             view=container_view(
                 discord.ui.TextDisplay(
                     "# Verification\nFollow the steps to link your Roblox account."
@@ -167,10 +213,11 @@ class Events(commands.Cog):
                 ),
             ),
             ephemeral=True,
+            wait=True,
         )
         member = interaction.user
-        if isinstance(member, discord.Member):
-            task = asyncio.create_task(self._watch(member, session))
+        if isinstance(member, discord.Member) and isinstance(message, discord.WebhookMessage):
+            task = asyncio.create_task(self._watch(member, session, message))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
@@ -197,7 +244,62 @@ class Events(commands.Cog):
         except discord.HTTPException:
             logger.warning("Could not send the verification panel")
 
-    async def _watch(self, member: discord.Member, session: SessionCreated) -> None:
+    async def _already(self, interaction: discord.Interaction[Any], roblox_id: int) -> None:
+        try:
+            username, emoji = await self._portrait(roblox_id)
+        except RobloxError as exc:
+            logger.warning("Roblox profile failed status=%s", exc.status)
+            await interaction.followup.send(
+                view=container_view(discord.ui.TextDisplay("Verification could not be started.")),
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            view=self._known_view(username, roblox_id, emoji),
+            ephemeral=True,
+        )
+
+    async def confirm(
+        self,
+        interaction: discord.Interaction[Any],
+        roblox_id: int,
+        username: str,
+        emoji: str,
+    ) -> None:
+        if interaction.guild_id != self.bot.settings.discord_guild_id:
+            return
+        emoji_id = _emoji_id(emoji)
+        if emoji_id is not None:
+            self._keep_emoji(emoji_id)
+        view = self._success_view(username, roblox_id, emoji)
+        try:
+            await interaction.response.edit_message(view=view)
+        except discord.HTTPException:
+            logger.warning("Could not show verification success")
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.send_message(view=view, ephemeral=True)
+                except discord.HTTPException:
+                    logger.warning("Could not show verification success")
+        member = interaction.user if isinstance(interaction.user, discord.Member) else None
+        guild = interaction.guild
+        if member is None and guild is not None:
+            member = guild.get_member(interaction.user.id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(interaction.user.id)
+                except discord.HTTPException:
+                    logger.warning("Could not find the member to verify")
+                    return
+        if member is not None:
+            await self._grant(member)
+
+    async def _watch(
+        self,
+        member: discord.Member,
+        session: SessionCreated,
+        message: discord.WebhookMessage,
+    ) -> None:
         dock = self.bot.dock
         if dock is None:
             return
@@ -215,15 +317,115 @@ class Events(commands.Cog):
                 logger.warning("Dock status failed status=%s", exc.status)
                 return
             result = state.result
-            if result is not None and result.roblox_id:
+            if result is not None and result.roblox_id and result.roblox_id.isdigit():
                 if result.discord_id not in {None, str(member.id)}:
                     logger.warning("Dock session finished for a different Discord user")
                     return
+                await self._show_success(message, int(result.roblox_id))
                 await self._grant(member)
                 return
             if state.status in {"expired", "cancelled"}:
                 return
         logger.info("Dock session ended before completion")
+
+    async def _show_success(self, message: discord.WebhookMessage, roblox_id: int) -> None:
+        try:
+            username, emoji = await self._portrait(roblox_id)
+        except RobloxError as exc:
+            logger.warning("Roblox profile failed status=%s", exc.status)
+            return
+        try:
+            await message.edit(view=self._success_view(username, roblox_id, emoji))
+        except discord.HTTPException:
+            logger.warning("Could not show verification success")
+
+    async def _portrait(self, roblox_id: int) -> tuple[str, str]:
+        roblox = self.bot.roblox
+        if roblox is None:
+            raise RobloxError(0)
+        username, image = await roblox.account(roblox_id)
+        name = f"headshot_{roblox_id}"
+        if len(name) > 32:
+            return username, ""
+        try:
+            found = discord.utils.get(await self.bot.fetch_application_emojis(), name=name)
+            emoji = found or await self.bot.create_application_emoji(name=name, image=image)
+        except discord.HTTPException:
+            logger.warning("Could not create headshot emoji")
+            return username, ""
+        self._keep_emoji(emoji.id)
+        return username, str(emoji)
+
+    def _keep_emoji(self, emoji_id: int) -> None:
+        previous = self._emoji_tasks.pop(emoji_id, None)
+        if previous is not None:
+            previous.cancel()
+        task = asyncio.create_task(self._expire_emoji(emoji_id))
+        self._emoji_tasks[emoji_id] = task
+
+    async def _expire_emoji(self, emoji_id: int) -> None:
+        try:
+            await asyncio.sleep(300)
+        except asyncio.CancelledError:
+            return
+        self._emoji_tasks.pop(emoji_id, None)
+        await self._delete_emoji(emoji_id)
+
+    async def _delete_emoji(self, emoji_id: int) -> None:
+        try:
+            emoji = await self.bot.fetch_application_emoji(emoji_id)
+            await emoji.delete()
+        except discord.HTTPException as exc:
+            if exc.status != 404:
+                logger.warning("Could not delete temporary emoji")
+
+    def _known_view(self, username: str, roblox_id: int, emoji: str) -> discord.ui.LayoutView:
+        profile = f"https://www.roblox.com/users/{roblox_id}/profile"
+        shot = f" {emoji}" if emoji else ""
+        view = discord.ui.LayoutView(timeout=300)
+        view.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(
+                    "## You're already verified!\n"
+                    f"We have you verified as [**{username}**]({profile}){shot}\n\n"
+                    "-# To switch to a different account, click **Change Account**.\n"
+                    "-# To continue using your current account, click **Continue**.\n\n"
+                ),
+                discord.ui.Separator(spacing=discord.SeparatorSpacing.large),
+                discord.ui.ActionRow(
+                    _Continue(roblox_id, username, emoji),
+                    discord.ui.Button(
+                        label="Change Account",
+                        style=discord.ButtonStyle.link,
+                        url="https://api.docksys.xyz/v1/api/verify/discord",
+                    ),
+                ),
+            )
+        )
+        return view
+
+    def _success_view(self, username: str, roblox_id: int, emoji: str) -> discord.ui.LayoutView:
+        profile = f"https://www.roblox.com/users/{roblox_id}/profile"
+        shot = f" {emoji}" if emoji else ""
+        view = discord.ui.LayoutView()
+        view.add_item(
+            discord.ui.Container(
+                discord.ui.TextDisplay(
+                    f"{self.bot.settings.emojis.approve} **Verification Successful!**\n"
+                    "-# You have been successfully verified under "
+                    f"[**{username}**]({profile}){shot}"
+                ),
+                discord.ui.MediaGallery(
+                    discord.MediaGalleryItem(
+                        "https://cdn.discordapp.com/attachments/1553889994538750133/"
+                        "1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
+                        "?ex=6ace0720&is=6accb5a0&hm="
+                        "4c4fffa70183ac88e939beabc0dccd963d97cb1f11463d2e77c7a759a2b49567&"
+                    ),
+                ),
+            )
+        )
+        return view
 
     async def _grant(self, member: discord.Member) -> None:
         role_id = self.bot.settings.verified_role_id

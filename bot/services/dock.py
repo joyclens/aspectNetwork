@@ -36,6 +36,20 @@ class SessionState(BaseModel):
     result: SessionResult | None = None
 
 
+def linked_roblox_id(payload: dict[str, Any]) -> str | None:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    roblox_id = data.get("robloxId")
+    if isinstance(roblox_id, bool):
+        return None
+    if isinstance(roblox_id, int) and roblox_id > 0:
+        return str(roblox_id)
+    if isinstance(roblox_id, str) and roblox_id.isdigit() and int(roblox_id) > 0:
+        return str(int(roblox_id))
+    return None
+
+
 class Dock:
     def __init__(self, api_key: str, pid: str) -> None:
         self._api_key = api_key
@@ -67,6 +81,21 @@ class Dock:
             return SessionCreated.model_validate(data)
         except ValidationError as exc:
             raise DockError(0) from exc
+
+    async def linked_roblox(self, discord_id: int, guild_id: int) -> str | None:
+        if discord_id < 1 or guild_id < 1:
+            raise DockError(0)
+        try:
+            payload = await self._request(
+                "GET",
+                "https://api.docksys.xyz/api/v1/public/discord-to-roblox",
+                params={"discordId": str(discord_id), "guildId": str(guild_id)},
+            )
+        except DockError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        return linked_roblox_id(payload)
 
     async def session_state(self, sid: str, wait: int = 25) -> SessionState:
         if not sid or any(char not in _SID_CHARS for char in sid):

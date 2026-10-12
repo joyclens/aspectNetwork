@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any, TypeVar
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -30,6 +30,48 @@ class GroupCurrency(BaseModel):
 class RevenueSummary(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
     pending_robux: int = Field(default=0, alias="pendingRobux")
+
+
+class _RobloxName(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+
+
+class _Headshot(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    state: str
+    image_url: str | None = Field(default=None, alias="imageUrl")
+
+
+class _Headshots(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    data: list[_Headshot] = Field(default_factory=list)
+
+
+_NAME = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+
+
+def _roblox_name(name: str) -> bool:
+    return 3 <= len(name) <= 20 and all(char in _NAME for char in name)
+
+
+def _image_allowed(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return (
+        parsed.scheme == "https"
+        and not parsed.username
+        and not parsed.password
+        and (host == "rbxcdn.com" or host.endswith(".rbxcdn.com"))
+    )
+
+
+def _image_bytes(body: bytes) -> bytes:
+    if not body or len(body) > 256 * 1024:
+        raise RobloxError(0)
+    if not body.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a")):
+        raise RobloxError(0)
+    return body
 
 
 def _allowed(url: str) -> bool:
@@ -91,7 +133,65 @@ class Roblox:
         )
         return _read(GroupCurrency, currency).robux, _read(RevenueSummary, summary).pending_robux
 
-    async def _request(self, method: str, url: str) -> Any:
+    async def account(self, user_id: int) -> tuple[str, bytes]:
+        if user_id < 1:
+            raise RobloxError(0)
+        profile, thumbs = await asyncio.gather(
+            self._request("GET", f"https://users.roblox.com/v1/users/{user_id}"),
+            self._request(
+                "GET",
+                "https://thumbnails.roblox.com/v1/users/avatar-headshot",
+                params={
+                    "userIds": str(user_id),
+                    "size": "150x150",
+                    "format": "Png",
+                    "isCircular": "false",
+                },
+            ),
+        )
+        name = _read(_RobloxName, profile).name
+        if not _roblox_name(name):
+            raise RobloxError(0)
+        page = _read(_Headshots, thumbs)
+        shot = page.data[0] if page.data else None
+        if shot is None or shot.state != "Completed" or not shot.image_url:
+            raise RobloxError(0)
+        return name, await self._image(shot.image_url)
+
+    async def _image(self, url: str) -> bytes:
+        session = self._session
+        if session is None or session.closed:
+            raise RobloxError(0)
+        current = url
+        for _ in range(2):
+            if not _image_allowed(current):
+                raise RobloxError(0)
+            try:
+                async with session.get(current, allow_redirects=False) as response:
+                    if response.status in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("Location")
+                        await response.read()
+                        if not location:
+                            raise RobloxError(response.status)
+                        current = urljoin(current, location)
+                        continue
+                    if response.status >= 300:
+                        await response.read()
+                        raise RobloxError(response.status)
+                    return _image_bytes(await response.read())
+            except RobloxError:
+                raise
+            except (aiohttp.ClientError, TimeoutError) as exc:
+                raise RobloxError(0) from exc
+        raise RobloxError(0)
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+    ) -> Any:
         if not _allowed(url):
             raise RobloxError(0)
         session = self._session
@@ -106,6 +206,7 @@ class Roblox:
                     method,
                     url,
                     headers=headers,
+                    params=params,
                     allow_redirects=False,
                 ) as response:
                     token = response.headers.get("x-csrf-token")
