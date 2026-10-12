@@ -1,13 +1,16 @@
-${accent}
-     _                      _
-    / \   ___ _ __   ___  ___| |_
-   / _ \ / __| '_ \ / _ \/ __| __|
-  / ___ \ \__ \ |_) |  __/ (__| |_
- /_/   \_\___/ .__/ \___|\___|\__|
-             |_|
-${aspect}
-Version     ${version}
-Users       ${users}
-Cogs        ${cogs}   
-Commands ${commands}
-Database    ${db}
+<color="#ff3171">
+
+                              █  
+▀▀▀▄  ▄▀▀▀ ▀█▀▀▄ ▄▀▀▀▄ ▄▀▀▀▄ ▀█▀▀
+▄▀▀█   ▀▀▄  █▄▄▀ █▀▀▀▀ █   ▄  █ ▄
+ ▀▀ ▀ ▀▀▀   █     ▀▀▀   ▀▀▀    ▀ 
+           ▀▀▀                   
+
+</color>
+
+<color="#ff3171">${aspect}</color>
+<color="#ff3171">Version     ${version}</color>
+<color="#ff3171">Users       ${users}</color>
+<color="#ff3171">Cogs        ${cogs}</color>
+<color="#ff3171">Commands    ${commands}</color>
+<color="#ff3171">Database    ${db}</color>

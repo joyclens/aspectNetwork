@@ -110,6 +110,18 @@ class Aspect(commands.Bot):
         self._banner_printed = True
         print_banner(self)
 
+    async def on_interaction(self, interaction: discord.Interaction[Any]) -> None:
+        if interaction.type is not discord.InteractionType.component:
+            return
+        payload: Any = interaction.data
+        custom_id = payload.get("custom_id") if isinstance(payload, dict) else ""
+        logger.info(
+            "Component %s from %s in guild %s",
+            custom_id or "(none)",
+            interaction.user.id,
+            interaction.guild_id,
+        )
+
     async def close(self) -> None:
         await super().close()
         if self._resources_closed:

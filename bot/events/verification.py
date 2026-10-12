@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -45,10 +46,25 @@ class VerifyButton(discord.ui.Button[Any]):
         )
 
     async def callback(self, interaction: discord.Interaction[Any]) -> None:
+        logger.info("Verification button clicked by %s", interaction.user.id)
         client = interaction.client
         cog = client.get_cog("Verification") if isinstance(client, Aspect) else None
-        if isinstance(cog, Verification):
+        if isinstance(cog, Verification) and not cog.claim(interaction.id):
+            return
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True, thinking=True)
+            if not isinstance(cog, Verification):
+                logger.error("Verification cog is not loaded")
+                await interaction.followup.send(
+                    view=container_view(discord.ui.TextDisplay("Verification is not ready.")),
+                    ephemeral=True,
+                )
+                return
             await cog.begin(interaction)
+        except Exception as exc:
+            logger.exception("Verification button failed")
+            await report_interaction(interaction, exc, where="Button verifyButton")
 
 
 class VerificationPanel(AspectLayout):
@@ -98,10 +114,22 @@ class _Continue(discord.ui.Button[Any]):
         self.headshot = emoji
 
     async def callback(self, interaction: discord.Interaction[Any]) -> None:
-        client = interaction.client
-        cog = client.get_cog("Verification") if isinstance(client, Aspect) else None
-        if isinstance(cog, Verification):
+        logger.info("Verification continue clicked by %s", interaction.user.id)
+        try:
+            client = interaction.client
+            cog = client.get_cog("Verification") if isinstance(client, Aspect) else None
+            if not isinstance(cog, Verification):
+                logger.error("Verification cog is not loaded")
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        view=container_view(discord.ui.TextDisplay("Verification is not ready.")),
+                        ephemeral=True,
+                    )
+                return
             await cog.confirm(interaction, self.roblox_id, self.username, self.headshot)
+        except Exception as exc:
+            logger.exception("Verification continue failed")
+            await report_interaction(interaction, exc, where="Button verifyContinue")
 
 
 class Verification(commands.Cog):
@@ -110,6 +138,15 @@ class Verification(commands.Cog):
         self._panel_id: int | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._emoji_tasks: dict[int, asyncio.Task[None]] = {}
+        self._handled: OrderedDict[int, None] = OrderedDict()
+
+    def claim(self, interaction_id: int) -> bool:
+        if interaction_id in self._handled:
+            return False
+        self._handled[interaction_id] = None
+        while len(self._handled) > 500:
+            self._handled.popitem(last=False)
+        return True
 
     async def cog_load(self) -> None:
         self.bot.add_view(VerificationPanel())
@@ -141,22 +178,51 @@ class Verification(commands.Cog):
         self._panel_id = None
         await self._panel()
 
-    async def begin(self, interaction: discord.Interaction[Any]) -> None:
-        if interaction.guild_id != self.bot.settings.discord_guild_id or interaction.user.bot:
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction[Any]) -> None:
+        if interaction.type is not discord.InteractionType.component:
             return
-        dock = self.bot.dock
-        if dock is None or self.bot.roblox is None or interaction.guild_id is None:
-            await interaction.response.send_message(
+        payload: Any = interaction.data
+        custom_id = payload.get("custom_id") if isinstance(payload, dict) else ""
+        if custom_id != "verifyButton" or not self.claim(interaction.id):
+            return
+        logger.warning("Verification button had no view handler")
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True, thinking=True)
+            await self.begin(interaction)
+        except Exception as exc:
+            logger.exception("Verification button failed")
+            await report_interaction(interaction, exc, where="Button verifyButton")
+
+    async def begin(self, interaction: discord.Interaction[Any]) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        guild_id = interaction.guild_id
+        if not isinstance(guild_id, int) or guild_id != self.bot.settings.discord_guild_id:
+            logger.warning(
+                "Verification button used in guild %s, expected %s",
+                guild_id,
+                self.bot.settings.discord_guild_id,
+            )
+            await interaction.followup.send(
                 view=container_view(discord.ui.TextDisplay("Verification is not ready.")),
                 ephemeral=True,
             )
             return
-        await interaction.response.defer(ephemeral=True)
-        linked = await dock.linked_roblox(interaction.user.id, interaction.guild_id)
+        dock = self.bot.dock
+        if dock is None or self.bot.roblox is None:
+            logger.error("Verification services are not ready")
+            await interaction.followup.send(
+                view=container_view(discord.ui.TextDisplay("Verification is not ready.")),
+                ephemeral=True,
+            )
+            return
+        linked = await dock.linked_roblox(interaction.user.id, guild_id)
         if linked is not None:
             await self._already(interaction, int(linked))
             return
-        session = await dock.create_session(str(interaction.user.id), interaction.guild_id)
+        session = await dock.create_session(str(interaction.user.id), guild_id)
         message = await interaction.followup.send(
             view=container_view(
                 discord.ui.TextDisplay(
@@ -257,6 +323,16 @@ class Verification(commands.Cog):
         emoji: str,
     ) -> None:
         if interaction.guild_id != self.bot.settings.discord_guild_id:
+            logger.warning(
+                "Verification continue used in guild %s, expected %s",
+                interaction.guild_id,
+                self.bot.settings.discord_guild_id,
+            )
+            notice = container_view(discord.ui.TextDisplay("Verification is not ready."))
+            if interaction.response.is_done():
+                await interaction.followup.send(view=notice, ephemeral=True)
+            else:
+                await interaction.response.send_message(view=notice, ephemeral=True)
             return
         emoji_id = _emoji_id(emoji)
         if emoji_id is not None:
