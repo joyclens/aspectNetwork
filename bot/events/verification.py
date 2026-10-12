@@ -35,50 +35,19 @@ def _has_id(components: list[Any], custom_id: str) -> bool:
     return False
 
 
-class _Support(discord.ui.Button[Any]):
+class VerifyButton(discord.ui.Button[Any]):
     def __init__(self) -> None:
         super().__init__(
-            label="Get Support",
-            style=discord.ButtonStyle.primary,
-            custom_id="support:gethelp",
-            emoji="<:support:1556395385730367488>",
+            label="Begin Verification",
+            style=discord.ButtonStyle.secondary,
+            custom_id="verifyButton",
         )
 
     async def callback(self, interaction: discord.Interaction[Any]) -> None:
         client = interaction.client
         cog = client.get_cog("Verification") if isinstance(client, Aspect) else None
         if isinstance(cog, Verification):
-            await cog.support(interaction)
-
-
-class _DashboardMenu(discord.ui.Select[Any]):
-    def __init__(self) -> None:
-        super().__init__(
-            custom_id="dashboard:menu",
-            placeholder="Select an option",
-            min_values=1,
-            max_values=1,
-            required=False,
-            options=[
-                discord.SelectOption(
-                    label="Discord Regulations",
-                    value="discord_regulations",
-                    emoji="<:regulations:1556098910223728720>",
-                ),
-                discord.SelectOption(
-                    label="Package ToS",
-                    value="package_tos",
-                    emoji="<:package:1551256156343636040>",
-                ),
-            ],
-        )
-
-    async def callback(self, interaction: discord.Interaction[Any]) -> None:
-        client = interaction.client
-        cog = client.get_cog("Verification") if isinstance(client, Aspect) else None
-        choice = self.values[0] if self.values else ""
-        if isinstance(cog, Verification):
-            await cog.dashboard(interaction, choice)
+            await cog.begin(interaction)
 
 
 class VerificationPanel(discord.ui.LayoutView):
@@ -89,30 +58,22 @@ class VerificationPanel(discord.ui.LayoutView):
                 discord.ui.MediaGallery(
                     discord.MediaGalleryItem(
                         "https://cdn.discordapp.com/attachments/1553889994538750133/"
-                        "1553891838950375454/dashboard.png"
-                        "?ex=6ace03cc&is=6accb24c&hm="
-                        "18b962942a03077b5c37fb0cecff053b874ff35928faa1a1ae86a48c66daa8d7&"
+                        "1553891882378076281/verification.png"
+                        "?ex=6ace03d6&is=6accb256&hm="
+                        "37c7c948efa60bd8ccc9401a509bf036d3d97c76f2b18f0b5f4692d662baa37c&"
                     )
                 ),
-                discord.ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
+                discord.ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
                 discord.ui.TextDisplay(
-                    "<:aspect:1553939826103947314> **Aspect Network** is the upcoming, "
-                    "biggest and purest network. From it's fresh branding to incredible "
-                    "hard working staff, we do our best to connect server owners with the "
-                    "right people to help their servers grow. Here at Aspect Network we "
-                    "want young and new server owners to make the most of their time and "
-                    "to help gain them attention."
+                    "# Verification\n\n"
+                    "Verification in **Aspect Network** is *essential* to gain **full access** "
+                    "to the server and its features.\n\n"
+                    "**Getting Started:**\n"
+                    "- Simply click the **Verify** button below.\n"
+                    "- Carefully *follow the steps* provided."
                 ),
-                discord.ui.ActionRow(
-                    _Support(),
-                    discord.ui.Button(
-                        label="Our Roblox Group",
-                        style=discord.ButtonStyle.link,
-                        url="https://www.roblox.com/communities/719648172/Aspect-Network#!/about",
-                    ),
-                ),
-                discord.ui.ActionRow(_DashboardMenu()),
-                discord.ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
+                discord.ui.ActionRow(VerifyButton()),
+                discord.ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
                 discord.ui.MediaGallery(
                     discord.MediaGalleryItem(
                         "https://cdn.discordapp.com/attachments/1553889994538750133/"
@@ -233,42 +194,6 @@ class Verification(commands.Cog):
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
-    async def support(self, interaction: discord.Interaction[Any]) -> None:
-        if interaction.guild_id != self.bot.settings.discord_guild_id:
-            return
-        await interaction.response.send_message(
-            view=container_view(
-                discord.ui.TextDisplay("<:support:1556395385730367488> **Get Support**")
-            ),
-            ephemeral=True,
-        )
-
-    async def dashboard(self, interaction: discord.Interaction[Any], choice: str) -> None:
-        if interaction.guild_id != self.bot.settings.discord_guild_id:
-            return
-        pages = {
-            "discord_regulations": "<:regulations:1556098910223728720> **Discord Regulations**",
-            "package_tos": "<:package:1551256156343636040> **Package ToS**",
-        }
-        text = pages.get(choice)
-        if text is None:
-            await interaction.response.send_message(
-                view=container_view(discord.ui.TextDisplay("That option is not available.")),
-                ephemeral=True,
-            )
-            return
-        await interaction.response.send_message(
-            view=container_view(discord.ui.TextDisplay(text)),
-            ephemeral=True,
-        )
-        message = interaction.message
-        if message is None:
-            return
-        try:
-            await message.edit(view=VerificationPanel())
-        except discord.HTTPException:
-            logger.warning("Could not reset the dashboard menu")
-
     async def _panel(self) -> None:
         async with self.bot.lock_for("verification-panel"):
             channel = self.bot.get_channel(1559306245901389907)
@@ -317,21 +242,9 @@ class Verification(commands.Cog):
             logger.warning("Could not read the verification channel")
             return True
         for message in found:
-            if message.author.id != user.id:
-                continue
-            components = list(message.components)
-            if _has_id(components, "dashboard:menu"):
+            if message.author.id == user.id and _has_id(list(message.components), "verifyButton"):
                 self._panel_id = message.id
                 return True
-            if not message.flags.components_v2:
-                continue
-            try:
-                await message.edit(view=VerificationPanel())
-            except discord.HTTPException:
-                logger.warning("Could not update the verification panel")
-                return True
-            self._panel_id = message.id
-            return True
         return False
 
     async def _already(self, interaction: discord.Interaction[Any], roblox_id: int) -> None:
