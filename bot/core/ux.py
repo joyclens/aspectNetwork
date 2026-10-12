@@ -43,7 +43,7 @@ def print_banner(bot: Aspect) -> None:
             "version": bot.version,
             "guilds": f"{len(bot.guilds):,}",
             "users": f"{len(bot.users):,}",
-            "extensions": str(len(bot.extensions)),
+            "cogs": str(len(bot.cogs)),
             "commands": str(len(set(bot.walk_commands()))),
             "db": bot.db_version,
         }

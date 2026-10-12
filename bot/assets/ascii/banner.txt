@@ -5,8 +5,9 @@ ${accent}
   / ___ \ \__ \ |_) |  __/ (__| |_
  /_/   \_\___/ .__/ \___|\___|\__|
              |_|
-${reset}${bold_white}Aspect${reset} ${aspect}
+${aspect}
 Version     ${version}
 Users       ${users}
-Extensions  ${extensions}   Commands ${commands}
+Cogs        ${cogs}   
+Commands ${commands}
 Database    ${db}

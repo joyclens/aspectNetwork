@@ -20,14 +20,13 @@ logger = logging.getLogger("aspect")
 
 ContextT = TypeVar("ContextT", bound=commands.Context[Any])
 
-_EXTENSION_ROOT = Path(__file__).resolve().parents[1] / "extensions"
 
-
-def _discover_extensions() -> list[str]:
+def _discover(folder: str) -> list[str]:
+    root = Path(__file__).resolve().parents[1] / folder
     return [
-        f"bot.extensions.{path.stem}"
-        for path in sorted(_EXTENSION_ROOT.glob("*.py"))
-        if not path.name.startswith("_")
+        f"bot.{folder}.{path.stem}"
+        for path in sorted(root.glob("*.py"))
+        if path.name != "__init__.py" and not path.name.startswith("_")
     ]
 
 
@@ -98,10 +97,10 @@ class Aspect(commands.Bot):
         await self.roblox.start()
         await self._check_roblox()
         await self._start_dock()
-        extensions = _discover_extensions()
-        for extension in extensions:
-            await self.load_extension(extension)
-        logger.info("Loaded %s extensions", len(extensions))
+        modules = _discover("cogs") + _discover("events")
+        for module in modules:
+            await self.load_extension(module)
+        logger.info("Loaded %s modules", len(modules))
         await self._sync_commands()
 
     async def on_ready(self) -> None:

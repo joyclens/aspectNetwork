@@ -25,19 +25,60 @@ def _emoji_id(token: str) -> int | None:
     return int(raw)
 
 
-class VerifyButton(discord.ui.Button[Any]):
+def _has_id(components: list[Any], custom_id: str) -> bool:
+    for component in components:
+        if getattr(component, "custom_id", None) == custom_id:
+            return True
+        children = getattr(component, "children", None)
+        if isinstance(children, list) and _has_id(children, custom_id):
+            return True
+    return False
+
+
+class _Support(discord.ui.Button[Any]):
     def __init__(self) -> None:
         super().__init__(
-            label="Begin Verification",
-            style=discord.ButtonStyle.secondary,
-            custom_id="verifyButton",
+            label="Get Support",
+            style=discord.ButtonStyle.primary,
+            custom_id="support:gethelp",
+            emoji="<:support:1556395385730367488>",
         )
 
     async def callback(self, interaction: discord.Interaction[Any]) -> None:
         client = interaction.client
-        cog = client.get_cog("Events") if isinstance(client, Aspect) else None
-        if isinstance(cog, Events):
-            await cog.begin(interaction)
+        cog = client.get_cog("Verification") if isinstance(client, Aspect) else None
+        if isinstance(cog, Verification):
+            await cog.support(interaction)
+
+
+class _DashboardMenu(discord.ui.Select[Any]):
+    def __init__(self) -> None:
+        super().__init__(
+            custom_id="dashboard:menu",
+            placeholder="Select an option",
+            min_values=1,
+            max_values=1,
+            required=False,
+            options=[
+                discord.SelectOption(
+                    label="Discord Regulations",
+                    value="discord_regulations",
+                    emoji="<:regulations:1556098910223728720>",
+                ),
+                discord.SelectOption(
+                    label="Package ToS",
+                    value="package_tos",
+                    emoji="<:package:1551256156343636040>",
+                ),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction[Any]) -> None:
+        client = interaction.client
+        cog = client.get_cog("Verification") if isinstance(client, Aspect) else None
+        choice = self.values[0] if self.values else ""
+        if isinstance(cog, Verification):
+            await cog.dashboard(interaction, choice)
 
 
 class VerificationPanel(discord.ui.LayoutView):
@@ -48,20 +89,29 @@ class VerificationPanel(discord.ui.LayoutView):
                 discord.ui.MediaGallery(
                     discord.MediaGalleryItem(
                         "https://cdn.discordapp.com/attachments/1553889994538750133/"
-                        "1553891882378076281/verification.png"
-                        "?ex=6ace03d6&is=6accb256&hm=37c7c948efa60bd8ccc9401a509bf036d3d97c76f2b18f0b5f4692d662baa37c&"
+                        "1553891838950375454/dashboard.png"
+                        "?ex=6ace03cc&is=6accb24c&hm="
+                        "18b962942a03077b5c37fb0cecff053b874ff35928faa1a1ae86a48c66daa8d7&"
                     )
                 ),
                 discord.ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 discord.ui.TextDisplay(
-                    "# Verification\n\n"
-                    "Verification in **Aspect Network** is *essential* to gain **full access** "
-                    "to the server and its features.\n\n"
-                    "**Getting Started:**\n"
-                    "- Simply click the **Verify** button below.\n"
-                    "- Carefully *follow the steps* provided."
+                    "<:aspect:1553939826103947314> **Aspect Network** is the upcoming, "
+                    "biggest and purest network. From it's fresh branding to incredible "
+                    "hard working staff, we do our best to connect server owners with the "
+                    "right people to help their servers grow. Here at Aspect Network we "
+                    "want young and new server owners to make the most of their time and "
+                    "to help gain them attention."
                 ),
-                discord.ui.ActionRow(VerifyButton()),
+                discord.ui.ActionRow(
+                    _Support(),
+                    discord.ui.Button(
+                        label="Our Roblox Group",
+                        style=discord.ButtonStyle.link,
+                        url="https://www.roblox.com/communities/719648172/Aspect-Network#!/about",
+                    ),
+                ),
+                discord.ui.ActionRow(_DashboardMenu()),
                 discord.ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 discord.ui.MediaGallery(
                     discord.MediaGalleryItem(
@@ -87,15 +137,15 @@ class _Continue(discord.ui.Button[Any]):
 
     async def callback(self, interaction: discord.Interaction[Any]) -> None:
         client = interaction.client
-        cog = client.get_cog("Events") if isinstance(client, Aspect) else None
-        if isinstance(cog, Events):
+        cog = client.get_cog("Verification") if isinstance(client, Aspect) else None
+        if isinstance(cog, Verification):
             await cog.confirm(interaction, self.roblox_id, self.username, self.headshot)
 
 
-class Events(commands.Cog):
+class Verification(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
-        self._posted = False
+        self._panel_id: int | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._emoji_tasks: dict[int, asyncio.Task[None]] = {}
 
@@ -112,48 +162,10 @@ class Events(commands.Cog):
             await self._delete_emoji(emoji_id)
 
     @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member) -> None:
-        if member.bot or member.guild.id != self.bot.settings.discord_guild_id:
+    async def on_ready(self) -> None:
+        if self.bot.user is None:
             return
-        channel = self.bot.get_channel(1551307570822779020)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(1551307570822779020)
-            except discord.HTTPException:
-                logger.warning("Welcome channel is unavailable")
-                return
-        if not isinstance(channel, discord.TextChannel):
-            logger.warning("Welcome channel is unavailable")
-            return
-        count = member.guild.member_count or len(member.guild.members)
-        try:
-            await channel.send(
-                view=container_view(
-                    discord.ui.TextDisplay(
-                        "<:affiliate:1551256291043971202> "
-                        f"Welcome <@{member.id}> to **Aspect Network**! "
-                        "We are pleased to have you join our journey "
-                        "to become *Your Ideal Connection*.\n"
-                        "-# And don't forget to check out our "
-                        "**[marketplace](https://discordapp.com/channels/1529135675318866020/1529142741110358027)**"
-                    ),
-                    discord.ui.ActionRow(
-                        discord.ui.Button(
-                            label=str(count),
-                            style=discord.ButtonStyle.secondary,
-                            disabled=True,
-                        ),
-                        discord.ui.Button(
-                            label="View our Dashboard",
-                            style=discord.ButtonStyle.link,
-                            url="https://discordapp.com/channels/1529135675318866020/1529141669340123257",
-                        ),
-                    ),
-                ),
-                allowed_mentions=discord.AllowedMentions(users=True),
-            )
-        except discord.HTTPException:
-            logger.warning("Could not send a welcome message")
+        await self._panel()
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
@@ -161,10 +173,10 @@ class Events(commands.Cog):
             await self._panel()
 
     @commands.Cog.listener()
-    async def on_ready(self) -> None:
-        if self._posted or self.bot.user is None:
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        if payload.channel_id != 1559306245901389907 or payload.message_id != self._panel_id:
             return
-        self._posted = True
+        self._panel_id = None
         await self._panel()
 
     async def begin(self, interaction: discord.Interaction[Any]) -> None:
@@ -221,28 +233,106 @@ class Events(commands.Cog):
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
+    async def support(self, interaction: discord.Interaction[Any]) -> None:
+        if interaction.guild_id != self.bot.settings.discord_guild_id:
+            return
+        await interaction.response.send_message(
+            view=container_view(
+                discord.ui.TextDisplay("<:support:1556395385730367488> **Get Support**")
+            ),
+            ephemeral=True,
+        )
+
+    async def dashboard(self, interaction: discord.Interaction[Any], choice: str) -> None:
+        if interaction.guild_id != self.bot.settings.discord_guild_id:
+            return
+        pages = {
+            "discord_regulations": "<:regulations:1556098910223728720> **Discord Regulations**",
+            "package_tos": "<:package:1551256156343636040> **Package ToS**",
+        }
+        text = pages.get(choice)
+        if text is None:
+            await interaction.response.send_message(
+                view=container_view(discord.ui.TextDisplay("That option is not available.")),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            view=container_view(discord.ui.TextDisplay(text)),
+            ephemeral=True,
+        )
+        message = interaction.message
+        if message is None:
+            return
+        try:
+            await message.edit(view=VerificationPanel())
+        except discord.HTTPException:
+            logger.warning("Could not reset the dashboard menu")
+
     async def _panel(self) -> None:
-        channel = self.bot.get_channel(1530638348421566678)
-        if channel is None:
-            try:
-                channel = await self.bot.fetch_channel(1530638348421566678)
-            except discord.HTTPException:
+        async with self.bot.lock_for("verification-panel"):
+            channel = self.bot.get_channel(1559306245901389907)
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(1559306245901389907)
+                except discord.HTTPException:
+                    logger.warning("Verification channel is unavailable")
+                    return
+            if not isinstance(channel, discord.TextChannel) or self.bot.user is None:
                 logger.warning("Verification channel is unavailable")
                 return
-        if not isinstance(channel, discord.TextChannel) or self.bot.user is None:
-            logger.warning("Verification channel is unavailable")
-            return
+            if await self._panel_exists(channel):
+                return
+            try:
+                message = await channel.send(view=VerificationPanel())
+            except discord.HTTPException:
+                logger.warning("Could not send the verification panel")
+                return
+            self._panel_id = message.id
+
+    async def _panel_exists(self, channel: discord.TextChannel) -> bool:
+        if self._panel_id is not None:
+            try:
+                await channel.fetch_message(self._panel_id)
+            except discord.NotFound:
+                self._panel_id = None
+            except discord.HTTPException:
+                logger.warning("Could not read the verification channel")
+                return True
+            else:
+                return True
+        user = self.bot.user
+        if user is None:
+            return True
+        found: list[discord.Message] = []
+        seen: set[int] = set()
         try:
-            async for message in channel.history(limit=30):
-                if message.author.id == self.bot.user.id and message.flags.components_v2:
-                    return
+            found.extend(await channel.pins())
+            seen.update(message.id for message in found)
+            async for message in channel.history(limit=100):
+                if message.id not in seen:
+                    seen.add(message.id)
+                    found.append(message)
         except discord.HTTPException:
             logger.warning("Could not read the verification channel")
-            return
-        try:
-            await channel.send(view=VerificationPanel())
-        except discord.HTTPException:
-            logger.warning("Could not send the verification panel")
+            return True
+        for message in found:
+            if message.author.id != user.id:
+                continue
+            components = list(message.components)
+            if _has_id(components, "dashboard:menu"):
+                self._panel_id = message.id
+                return True
+            if not message.flags.components_v2:
+                continue
+            try:
+                await message.edit(view=VerificationPanel())
+            except discord.HTTPException:
+                logger.warning("Could not update the verification panel")
+                return True
+            self._panel_id = message.id
+            return True
+        return False
 
     async def _already(self, interaction: discord.Interaction[Any], roblox_id: int) -> None:
         try:
@@ -445,4 +535,4 @@ class Events(commands.Cog):
 
 
 async def setup(bot: Aspect) -> None:
-    await bot.add_cog(Events(bot))
+    await bot.add_cog(Verification(bot))
