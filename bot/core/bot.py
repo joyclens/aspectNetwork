@@ -21,22 +21,14 @@ logger = logging.getLogger("aspect")
 ContextT = TypeVar("ContextT", bound=commands.Context[Any])
 
 _EXTENSION_ROOT = Path(__file__).resolve().parents[1] / "extensions"
-_EXTENSION_PACKAGES = ("commands", "events")
 
 
 def _discover_extensions() -> list[str]:
-    names: list[str] = []
-    for package in _EXTENSION_PACKAGES:
-        folder = _EXTENSION_ROOT / package
-        if not folder.is_dir():
-            continue
-        for path in sorted(folder.rglob("*.py")):
-            if path.name.startswith("_"):
-                continue
-            relative = path.relative_to(folder).with_suffix("")
-            dotted = ".".join(relative.parts)
-            names.append(f"bot.extensions.{package}.{dotted}")
-    return names
+    return [
+        f"bot.extensions.{path.stem}"
+        for path in sorted(_EXTENSION_ROOT.glob("*.py"))
+        if not path.name.startswith("_")
+    ]
 
 
 def _log_error(message: str, error: BaseException) -> None:
