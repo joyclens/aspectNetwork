@@ -52,7 +52,7 @@ class VerificationPanel(discord.ui.LayoutView):
                         "?ex=6ace03d6&is=6accb256&hm=37c7c948efa60bd8ccc9401a509bf036d3d97c76f2b18f0b5f4692d662baa37c&"
                     )
                 ),
-                discord.ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+                discord.ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 discord.ui.TextDisplay(
                     "# Verification\n\n"
                     "Verification in **Aspect Network** is *essential* to gain **full access** "
@@ -62,7 +62,7 @@ class VerificationPanel(discord.ui.LayoutView):
                     "- Carefully *follow the steps* provided."
                 ),
                 discord.ui.ActionRow(VerifyButton()),
-                discord.ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+                discord.ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 discord.ui.MediaGallery(
                     discord.MediaGalleryItem(
                         "https://cdn.discordapp.com/attachments/1553889994538750133/"
