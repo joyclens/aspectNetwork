@@ -8,6 +8,8 @@ from urllib.parse import urljoin, urlparse
 import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from bot.shared.http import session
+
 
 class RobloxError(Exception):
     def __init__(self, status: int) -> None:
@@ -96,27 +98,34 @@ def _read(model: type[T], payload: Any) -> T:
 
 
 class Roblox:
-    def __init__(self, cookie: str, group_id: int) -> None:
+    def __init__(
+        self,
+        cookie: str,
+        group_id: int,
+        http: aiohttp.ClientSession | None = None,
+    ) -> None:
         if group_id < 1:
             raise ValueError("invalid group")
         self._cookie = cookie
         self._group_id = group_id
         self._csrf: str | None = None
-        self._session: aiohttp.ClientSession | None = None
+        self._session = http
+        self._shared = http is not None
 
     def __repr__(self) -> str:
         return "Roblox()"
 
     async def start(self) -> None:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=20),
-                headers={"User-Agent": "Aspect/0.1"},
-            )
+        if self._session is not None and not self._session.closed:
+            return
+        if self._shared:
+            raise RobloxError(0)
+        self._session = session(timeout=20)
 
     async def close(self) -> None:
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
+        if self._shared or self._session is None or self._session.closed:
+            return
+        await self._session.close()
 
     async def authenticated(self) -> AuthenticatedUser:
         payload = await self._request("GET", "https://users.roblox.com/v1/users/authenticated")

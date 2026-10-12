@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from bot.shared.http import session
+
 _SID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
 
 
@@ -51,24 +53,31 @@ def linked_roblox_id(payload: dict[str, Any]) -> str | None:
 
 
 class Dock:
-    def __init__(self, api_key: str, pid: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        pid: str,
+        http: aiohttp.ClientSession | None = None,
+    ) -> None:
         self._api_key = api_key
         self._pid = pid
-        self._session: aiohttp.ClientSession | None = None
+        self._session = http
+        self._shared = http is not None
 
     def __repr__(self) -> str:
         return "Dock()"
 
     async def start(self) -> None:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=40),
-                headers={"User-Agent": "Aspect/0.1"},
-            )
+        if self._session is not None and not self._session.closed:
+            return
+        if self._shared:
+            raise DockError(0)
+        self._session = session(timeout=40)
 
     async def close(self) -> None:
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
+        if self._shared or self._session is None or self._session.closed:
+            return
+        await self._session.close()
 
     async def create_session(self, client_id: str, guild_id: int) -> SessionCreated:
         payload = await self._request(

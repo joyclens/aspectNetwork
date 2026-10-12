@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import discord
 from discord.ext import commands
 
-from bot.shared.layout import container_view
+from bot.shared.layout import AspectLayout, container_view
 
 if TYPE_CHECKING:
     from bot.core.bot import Aspect
@@ -30,7 +30,7 @@ class _Choice(discord.ui.Button[Any]):
         view.stop()
 
 
-class Confirmation(discord.ui.LayoutView):
+class Confirmation(AspectLayout):
     def __init__(self, author_id: int, text: str) -> None:
         super().__init__(timeout=30)
         self.author_id = author_id
@@ -51,10 +51,9 @@ class Context(commands.Context["Aspect"]):
     async def approve(self, text: str) -> discord.Message:
         return await self.send(view=self._view(text, self.bot.settings.emojis.approve))
 
-    async def warn(self, text: str) -> discord.Message:
-        kwargs: dict[str, Any] = {}
+    async def warn(self, text: str, **kwargs: Any) -> discord.Message:
         if self.interaction is not None:
-            kwargs["ephemeral"] = True
+            kwargs.setdefault("ephemeral", True)
         return await self.send(view=self._view(text, self.bot.settings.emojis.warn), **kwargs)
 
     async def prompt(self, text: str) -> Literal[True]:

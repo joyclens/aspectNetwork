@@ -25,5 +25,5 @@ def main() -> None:
         print("Invalid configuration.", file=sys.stderr)
         raise SystemExit(1) from None
     setup_logging(settings)
-    with suppress(KeyboardInterrupt):
+    with suppress(KeyboardInterrupt, ProcessLookupError):
         asyncio.run(run(settings))

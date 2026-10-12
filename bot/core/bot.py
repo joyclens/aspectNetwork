@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
+import aiohttp
 import discord
 from discord.ext import commands
 
@@ -15,6 +16,8 @@ from bot.core.ux import print_banner
 from bot.services.dock import Dock
 from bot.services.roblox import Roblox, RobloxError
 from bot.shared.context import Context, PromptDeclined
+from bot.shared.errors import deliver_trace, error_mentions, error_notice, remember_error
+from bot.shared.http import session
 
 logger = logging.getLogger("aspect")
 
@@ -30,24 +33,25 @@ def _discover(folder: str) -> list[str]:
     ]
 
 
-def _log_error(message: str, error: BaseException) -> None:
-    logger.error(message, exc_info=(type(error), error, error.__traceback__))
-
-
 class Aspect(commands.Bot):
     def __init__(self, settings: Settings) -> None:
         super().__init__(
             command_prefix=settings.command_prefix,
+            case_insensitive=True,
+            strip_after_prefix=True,
             intents=discord.Intents.all(),
             allowed_mentions=discord.AllowedMentions.none(),
             help_command=None,
+            max_messages=300,
         )
         self.settings = settings
+        self.session: aiohttp.ClientSession | None = None
         self.db: Database | None = None
         self.roblox: Roblox | None = None
         self.dock: Dock | None = None
         self.db_version = ""
         self._locks: dict[str, asyncio.Lock] = {}
+        self.traceback: dict[str, BaseException] = {}
         self._banner_printed = False
         self._resources_closed = False
         self.add_listener(self._on_command_error, "on_command_error")
@@ -89,36 +93,55 @@ class Aspect(commands.Bot):
         return await super().get_context(origin, cls=cls)
 
     async def setup_hook(self) -> None:
+        self.session = session(timeout=40)
         self.db, self.db_version = await connect(self.settings.postgres_dsn.get_secret_value())
         self.roblox = Roblox(
             self.settings.roblox_cookie.get_secret_value(),
             self.settings.roblox_group_id,
+            self.session,
         )
         await self.roblox.start()
-        await self._check_roblox()
-        await self._start_dock()
-        modules = _discover("cogs") + _discover("events")
-        for module in modules:
-            await self.load_extension(module)
-        logger.info("Loaded %s modules", len(modules))
-        await self._sync_commands()
+        await asyncio.gather(self._check_roblox(), self._start_dock())
+        await self._load_extensions()
 
     async def on_ready(self) -> None:
         if self._banner_printed or self.user is None:
             return
         self._banner_printed = True
+        await self._sync_commands()
         print_banner(self)
 
     async def close(self) -> None:
-        if not self._resources_closed:
-            self._resources_closed = True
-            if self.roblox is not None:
-                await self.roblox.close()
-            if self.dock is not None:
-                await self.dock.close()
-            if self.db is not None:
-                await self.db.close()
         await super().close()
+        if self._resources_closed:
+            return
+        self._resources_closed = True
+        if self.roblox is not None:
+            await self.roblox.close()
+        if self.dock is not None:
+            await self.dock.close()
+        if self.session is not None and not self.session.closed:
+            await self.session.close()
+        if self.db is not None:
+            await self.db.close()
+
+    async def _load_extensions(self) -> None:
+        for module in _discover("cogs") + _discover("events"):
+            try:
+                await self.load_extension(module)
+            except commands.ExtensionError:
+                logger.error("Error loading extension %s", module, exc_info=True)
+                continue
+            cog = list(self.cogs.values())[-1] if self.cogs else None
+            if cog is None:
+                logger.info("Loaded %s", module)
+                continue
+            logger.info(
+                "Loaded %s with %s commands and %s events",
+                cog.qualified_name,
+                len(set(cog.walk_commands())),
+                len(cog.get_listeners()),
+            )
 
     async def _on_command_error(
         self,
@@ -126,6 +149,8 @@ class Aspect(commands.Bot):
         exception: commands.CommandError,
     ) -> None:
         if not isinstance(context, Context) or isinstance(exception, commands.CommandNotFound):
+            return
+        if isinstance(exception, commands.NotOwner):
             return
         original: BaseException = exception
         if isinstance(exception, commands.CommandInvokeError):
@@ -147,14 +172,12 @@ class Aspect(commands.Bot):
             if isinstance(exception, commands.CheckFailure):
                 await context.warn("You cannot use that here.")
                 return
-            if isinstance(original, RobloxError):
-                logger.warning("Roblox request failed status=%s", original.status)
-                await context.warn("Roblox could not complete that request.")
-                return
-            _log_error("Command failed", original)
-            await context.warn("Something went wrong.")
+            code = remember_error(self.traceback, original, where="Command")
+            await context.warn(error_notice(code), allowed_mentions=error_mentions())
+            if await self.is_owner(context.author):
+                await deliver_trace(context.author, self.settings, original)
         except discord.HTTPException:
-            _log_error("Failed to send an error reply", original)
+            remember_error(self.traceback, original, where="Command reply")
 
     async def _check_roblox(self) -> None:
         if self.roblox is None:
@@ -173,7 +196,10 @@ class Aspect(commands.Bot):
             if key is not None or pid is not None:
                 logger.warning("Dock verification is missing its api key or pid")
             return
-        self.dock = Dock(key.get_secret_value(), pid)
+        if self.session is None:
+            logger.warning("Dock verification is missing its http session")
+            return
+        self.dock = Dock(key.get_secret_value(), pid, self.session)
         await self.dock.start()
 
     async def _sync_commands(self) -> None:
