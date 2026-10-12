@@ -1,16 +1,13 @@
-<color="#ff3171">
-
                               █  
 ▀▀▀▄  ▄▀▀▀ ▀█▀▀▄ ▄▀▀▀▄ ▄▀▀▀▄ ▀█▀▀
 ▄▀▀█   ▀▀▄  █▄▄▀ █▀▀▀▀ █   ▄  █ ▄
  ▀▀ ▀ ▀▀▀   █     ▀▀▀   ▀▀▀    ▀ 
            ▀▀▀                   
 
-</color>
 
-<color="#ff3171">${aspect}</color>
-<color="#ff3171">Version     ${version}</color>
-<color="#ff3171">Users       ${users}</color>
-<color="#ff3171">Cogs        ${cogs}</color>
-<color="#ff3171">Commands    ${commands}</color>
-<color="#ff3171">Database    ${db}</color>
+${aspect}
+Version     ${version}
+Users       ${users}
+Cogs        ${cogs}
+Commands    ${commands}
+Database    ${db}

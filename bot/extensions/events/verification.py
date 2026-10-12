@@ -110,7 +110,7 @@ class Verification(commands.Cog):
         dock = self.bot.dock
         if dock is None or interaction.guild_id is None:
             await interaction.response.send_message(
-                view=container_view(discord.ui.TextDisplay("Verification is not ready.")),
+                view=container_view(discord.ui.TextDisplay("**Sorry!** We're currently undergoing maintenance, please try again later.")),
                 ephemeral=True,
             )
             return
@@ -120,7 +120,7 @@ class Verification(commands.Cog):
         except DockError as exc:
             logger.warning("Dock session failed status=%s", exc.status)
             await interaction.followup.send(
-                view=container_view(discord.ui.TextDisplay("Verification could not be started.")),
+                view=container_view(discord.ui.TextDisplay("**Sorry!** We're currently undergoing maintenance, please try again later.")),
                 ephemeral=True,
             )
             return
