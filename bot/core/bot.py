@@ -108,7 +108,6 @@ class Aspect(commands.Bot):
         if self._banner_printed or self.user is None:
             return
         self._banner_printed = True
-        await self._sync_commands()
         print_banner(self)
 
     async def close(self) -> None:
