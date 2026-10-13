@@ -7,7 +7,6 @@ from typing import Any, TypeVar, overload
 
 import aiohttp
 import discord
-import jishaku
 from discord.ext import commands
 
 from bot import __version__
