@@ -21,8 +21,14 @@ class Developer(commands.Cog):
         self.bot = bot
 
     @commands.is_owner()
-    @commands.hybrid_command(name="traceback", aliases=("trace", "error"))  # type: ignore[arg-type]
-    @app_commands.describe(error_code="Error code from a failed command or button")
+    @commands.hybrid_command(
+        name="traceback",
+        aliases=("trace", "error"),
+        description="Show a stored traceback.",
+    )  # type: ignore[arg-type]
+    @app_commands.describe(
+        error_code="Error code from a failed command or button",
+    )
     async def traceback(
         self,
         ctx: commands.Context[Any],

@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS transactions_group_kind_created_idx
     ON transactions (group_id, kind, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS transactions_group_agent_created_idx
+    ON transactions (group_id, agent_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS transactions_group_amount_idx
+    ON transactions (group_id, amount DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value JSONB NOT NULL

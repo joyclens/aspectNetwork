@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 from urllib.parse import urljoin, urlparse
 
@@ -34,6 +35,23 @@ class RevenueSummary(BaseModel):
     pending_robux: int = Field(default=0, alias="pendingRobux")
 
 
+class Sale(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+    id: int
+    created: datetime
+    pending: bool
+    agent_id: int
+    agent_name: str
+    agent_type: str
+    item_id: int | None
+    item_name: str
+    item_type: str
+    place_id: int | None = None
+    amount: int
+    currency: str
+    raw: dict[str, Any] = Field(default_factory=dict, repr=False)
+
+
 class _RobloxName(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: str
@@ -48,6 +66,52 @@ class _Headshot(BaseModel):
 class _Headshots(BaseModel):
     model_config = ConfigDict(extra="ignore")
     data: list[_Headshot] = Field(default_factory=list)
+
+
+class _Money(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    amount: int
+    type: str
+
+
+class _Place(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    place_id: int = Field(alias="placeId")
+
+
+class _SaleItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: int | None = None
+    name: str | None = None
+    type: str | None = None
+    place: _Place | None = None
+    currency: _Money | None = None
+
+
+class _Party(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: int
+    type: str
+    name: str
+
+
+class _Txn(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    id: int
+    created: datetime
+    is_pending: bool = Field(default=False, alias="isPending")
+    agent: _Party
+    details: _SaleItem | None = None
+    currency: _Money | None = None
+
+
+class _SalesPage(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    next_page_cursor: str | None = Field(default=None, alias="nextPageCursor")
+    data: list[Any] = Field(default_factory=list)
+
+
+_MAX_ID = 2**63 - 1
 
 
 _NAME = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
@@ -88,6 +152,60 @@ def _allowed(url: str) -> bool:
 
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _positive(value: int | None) -> int | None:
+    if value is None or not 1 <= value <= _MAX_ID:
+        return None
+    return value
+
+
+def _sale(row: Any) -> Sale | None:
+    if not isinstance(row, dict):
+        return None
+    try:
+        parsed = _Txn.model_validate(row)
+    except ValidationError:
+        return None
+    if not 1 <= parsed.id <= _MAX_ID or not 1 <= parsed.agent.id <= _MAX_ID:
+        return None
+    details = parsed.details
+    money = parsed.currency or (details.currency if details else None)
+    name = parsed.agent.name.strip()
+    if money is None or not name or abs(money.amount) > _MAX_ID:
+        return None
+    created = parsed.created
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    item_name = (details.name if details and details.name else "Item").strip() or "Item"
+    return Sale(
+        id=parsed.id,
+        created=created,
+        pending=parsed.is_pending,
+        agent_id=parsed.agent.id,
+        agent_name=name,
+        agent_type=parsed.agent.type,
+        item_id=_positive(details.id if details else None),
+        item_name=item_name,
+        item_type=(details.type if details and details.type else "").strip(),
+        place_id=_positive(details.place.place_id if details and details.place else None),
+        amount=money.amount,
+        currency=money.type,
+        raw=row,
+    )
+
+
+def parse_sales(payload: Any) -> tuple[list[Sale], str | None]:
+    page = _read(_SalesPage, payload)
+    sales = [sale for row in page.data if (sale := _sale(row)) is not None]
+    if page.data and not sales:
+        raise RobloxError(0)
+    cursor = page.next_page_cursor
+    return sales, cursor or None
+
+
+def sale_from_raw(payload: Any) -> Sale | None:
+    return _sale(payload)
 
 
 def _read(model: type[T], payload: Any) -> T:
@@ -141,6 +259,17 @@ class Roblox:
             ),
         )
         return _read(GroupCurrency, currency).robux, _read(RevenueSummary, summary).pending_robux
+
+    async def sales(self, *, cursor: str | None = None) -> tuple[list[Sale], str | None]:
+        params = {"transactionType": "Sale", "limit": "100", "sortOrder": "Desc"}
+        if cursor:
+            params["cursor"] = cursor
+        payload = await self._request(
+            "GET",
+            f"https://economy.roblox.com/v2/groups/{self._group_id}/transactions",
+            params=params,
+        )
+        return parse_sales(payload)
 
     async def account(self, user_id: int) -> tuple[str, bytes]:
         if user_id < 1:
