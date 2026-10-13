@@ -29,6 +29,8 @@ def secret_values(settings: Settings) -> list[str]:
     ]
     if settings.dock_api_key is not None:
         values.append(settings.dock_api_key.get_secret_value())
+    if settings.cookie_api_key is not None:
+        values.append(settings.cookie_api_key.get_secret_value())
     password = unquote(urlparse(settings.postgres_dsn.get_secret_value()).password or "")
     if password:
         values.append(password)

@@ -21,14 +21,8 @@ class Developer(commands.Cog):
         self.bot = bot
 
     @commands.is_owner()
-    @commands.hybrid_command(
-        name="traceback",
-        aliases=("trace", "error"),
-        description="Show a stored traceback.",
-    )  # type: ignore[arg-type]
-    @app_commands.describe(
-        error_code="Error code from a failed command or button",
-    )
+    @commands.hybrid_command(name="traceback", aliases=("trace", "error"))  # type: ignore[arg-type]
+    @app_commands.describe(error_code="Error code from a failed command or button")
     async def traceback(
         self,
         ctx: commands.Context[Any],
@@ -39,18 +33,21 @@ class Developer(commands.Cog):
         code = error_code
         if code is None:
             if not self.bot.traceback:
-                await ctx.warn("No traceback has been raised recently.")
+                await ctx.warn(
+                    "I was **unable** to find a traceback, "
+                    "maybe no tracebacks have been raised recently?"
+                )
                 return
             code = next(reversed(self.bot.traceback))
         elif not _code_ok(code):
-            await ctx.warn("That error code is not valid.")
+            await ctx.warn("That error code is **not** valid.")
             return
         exc = self.bot.traceback.get(code)
         if exc is None:
-            await ctx.warn("No traceback has been raised with that error code.")
+            await ctx.warn("I was **unable** to find a traceback with that error code.")
             return
         if not await deliver_trace(ctx.author, self.bot.settings, exc):
-            await ctx.warn("I could not send you the traceback.")
+            await ctx.warn("I was **unable** to send you the traceback.")
 
 
 async def setup(bot: Aspect) -> None:

@@ -28,7 +28,10 @@ class Settings(BaseSettings):
     roblox_group_id: int = Field(default=719648172, gt=0)
     dock_api_key: SecretStr | None = None
     dock_pid: str | None = None
+    cookie_api_key: SecretStr | None = None
     verified_role_id: int | None = Field(default=None, gt=0)
+    ticket_support_role_id: int | None = Field(default=None, gt=0)
+    ticket_logs_channel_id: int | None = Field(default=None, gt=0)
     emojis: Emojis = Field(default_factory=Emojis)
 
     @field_validator("command_prefix")
@@ -50,9 +53,9 @@ class Settings(BaseSettings):
             raise ValueError("invalid postgres dsn")
         return SecretStr(raw)
 
-    @field_validator("dock_api_key")
+    @field_validator("dock_api_key", "cookie_api_key")
     @classmethod
-    def dock_key_ok(cls, value: SecretStr | None) -> SecretStr | None:
+    def optional_key_ok(cls, value: SecretStr | None) -> SecretStr | None:
         if value is None:
             return None
         raw = value.get_secret_value().strip()

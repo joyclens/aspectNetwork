@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import discord
@@ -10,10 +11,53 @@ from discord.ext import commands, tasks
 from bot.core.bot import Aspect
 from bot.services.dock import DockError
 from bot.services.roblox import RobloxError, Sale
+from bot.shared.checks import database
 from bot.shared.context import require_context
 from bot.shared.layout import AspectLayout
 
 logger = logging.getLogger("aspect")
+
+
+def timeframe_choices(now: datetime) -> list[str]:
+    return [
+        "Weekly",
+        "Monthly",
+        "Yearly",
+        now.strftime("%B"),
+        "All Time",
+        str(now.year),
+        str(now.year - 1),
+    ]
+
+
+def timeframe_bounds(
+    choice: str,
+    now: datetime,
+) -> tuple[datetime | None, datetime | None] | None:
+    if choice not in timeframe_choices(now):
+        return None
+    if choice == "Weekly":
+        return now - timedelta(days=7), now
+    if choice == "Monthly":
+        return now - timedelta(days=30), now
+    if choice == "Yearly":
+        return now - timedelta(days=365), now
+    if choice == "All Time":
+        return None, None
+    if choice == now.strftime("%B"):
+        start = datetime(now.year, now.month, 1, tzinfo=UTC)
+        if now.month == 12:
+            return start, datetime(now.year + 1, 1, 1, tzinfo=UTC)
+        return start, datetime(now.year, now.month + 1, 1, tzinfo=UTC)
+    if choice == str(now.year):
+        return (
+            datetime(now.year, 1, 1, tzinfo=UTC),
+            datetime(now.year + 1, 1, 1, tzinfo=UTC),
+        )
+    if choice == str(now.year - 1):
+        year = now.year - 1
+        return datetime(year, 1, 1, tzinfo=UTC), datetime(year + 1, 1, 1, tzinfo=UTC)
+    return None
 
 
 class History(AspectLayout):
@@ -47,9 +91,7 @@ class History(AspectLayout):
                 linked = f"[{name}](https://www.roblox.com/games/{sale.place_id})"
             else:
                 linked = f"**{name}**"
-            lines.append(
-                f"- {linked} · `{sale.amount:,}` · <t:{int(sale.created.timestamp())}:d>"
-            )
+            lines.append(f"- {linked} · `{sale.amount:,}` · <t:{int(sale.created.timestamp())}:d>")
         if pages > 1:
             lines += ["", f"-# Page {self.page + 1}/{pages}"]
 
@@ -97,19 +139,16 @@ class Purchases(commands.Cog):
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     @commands.cooldown(1, 5, commands.BucketType.user)
-    @commands.hybrid_group(
-        name="purchases", 
-        fallback="recent"
-    )  # type: ignore[arg-type]
+    @commands.hybrid_group(name="purchases", fallback="recent")  # type: ignore[arg-type]
     async def purchases(self, ctx: commands.Context[Any]) -> None:
         """Show the most recent store purchase."""
         ctx = require_context(ctx)
-        if self.bot.db is None:
-            await ctx.warn("The database is not ready.")
-            return
-        sale = await self.bot.db.recent_sale(self.bot.settings.roblox_group_id)
+        sale = await database(self.bot).recent_sale(self.bot.settings.roblox_group_id)
         if sale is None:
-            await ctx.warn("No purchases have been recorded yet.")
+            await ctx.warn(
+                "I was **unable** to find the most recent purchase, "
+                "maybe no purchases have been recorded yet?"
+            )
             return
         name = sale.item_name.replace("`", "'")
         if sale.item_id and sale.item_type == "GamePass":
@@ -150,16 +189,14 @@ class Purchases(commands.Cog):
         )
         await ctx.send(view=view)
 
-    @purchases.command(
-        name="history",
-        description="Show a member's past store purchases.",
-    )  # type: ignore[arg-type]
+    @purchases.command(name="history")  # type: ignore[arg-type]
     @app_commands.describe(user="Discord member whose linked Roblox purchases to show")
     async def history(self, ctx: commands.Context[Any], user: discord.Member) -> None:
         """Show a member's past store purchases."""
         ctx = require_context(ctx)
-        if self.bot.db is None or self.bot.dock is None:
-            await ctx.warn("Purchases are not ready.")
+        db = database(self.bot)
+        if self.bot.dock is None:
+            await ctx.warn("I was **unable** to show that member's purchase history.")
             return
         try:
             linked = await self.bot.dock.linked_roblox(
@@ -167,30 +204,28 @@ class Purchases(commands.Cog):
                 ctx.guild.id if ctx.guild else self.bot.settings.discord_guild_id,
             )
         except DockError:
-            await ctx.warn("Could not look up that member's Roblox account.")
+            logger.warning("Dock lookup failed for purchase history user=%s", user.id)
+            await ctx.warn("I was **unable** to look up that member's Roblox account.")
             return
         if linked is None:
-            await ctx.warn("That member is not verified.")
+            await ctx.warn("That member is **not** verified.")
             return
-        sales = await self.bot.db.agent_sales(self.bot.settings.roblox_group_id, int(linked))
+        sales = await db.agent_sales(self.bot.settings.roblox_group_id, int(linked))
         if not sales:
-            await ctx.warn("No purchases were found for that member.")
+            await ctx.warn("I was **unable** to find any purchases for that member.")
             return
         await ctx.send(view=History(ctx.author.id, sales))
 
-    @purchases.command(
-        name="highest",
-        description="Show the highest store purchase.",
-    )  # type: ignore[arg-type]
+    @purchases.command(name="highest")  # type: ignore[arg-type]
     async def highest(self, ctx: commands.Context[Any]) -> None:
         """Show the highest store purchase."""
         ctx = require_context(ctx)
-        if self.bot.db is None:
-            await ctx.warn("The database is not ready.")
-            return
-        sale = await self.bot.db.highest_sale(self.bot.settings.roblox_group_id)
+        sale = await database(self.bot).highest_sale(self.bot.settings.roblox_group_id)
         if sale is None:
-            await ctx.warn("No purchases have been recorded yet.")
+            await ctx.warn(
+                "I was **unable** to find the highest purchase, "
+                "maybe no purchases have been recorded yet?"
+            )
             return
         name = sale.item_name.replace("`", "'")
         if sale.item_id and sale.item_type == "GamePass":
@@ -230,6 +265,60 @@ class Purchases(commands.Cog):
             )
         )
         await ctx.send(view=view)
+
+    @purchases.command(name="time")  # type: ignore[arg-type]
+    @app_commands.describe(timeframe="Weekly, Monthly, Yearly, this month, All Time, or a year")
+    async def time(self, ctx: commands.Context[Any], timeframe: str) -> None:
+        """Show purchase stats for a timeframe."""
+        ctx = require_context(ctx)
+        choice = timeframe.strip()
+        if len(choice) > 32:
+            await ctx.warn("That timeframe is not valid.")
+            return
+        bounds = timeframe_bounds(choice, datetime.now(UTC))
+        if bounds is None:
+            await ctx.warn("That timeframe is not valid.")
+            return
+        start, end = bounds
+        count, total = await database(self.bot).sales_summary(
+            self.bot.settings.roblox_group_id,
+            start,
+            end,
+        )
+        view = ui.LayoutView()
+        view.add_item(
+            ui.Container(
+                ui.TextDisplay(
+                    f"## <:marketplace:1551256187301797970> Purchase Stats\nStats for **{choice}**."
+                ),
+                ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+                ui.TextDisplay(
+                    f"**Purchases:** `{count:,}`\n**Robux Earned:** `{total:,}` after tax"
+                ),
+                ui.MediaGallery(
+                    discord.MediaGalleryItem(
+                        "https://cdn.discordapp.com/attachments/1553889994538750133/"
+                        "1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
+                        "?ex=6acf58a0&is=6ace0720&hm="
+                        "4b79fc195d2f294319e01d01a76782756319a8d26e95abc78e1aed22d3db5ecd&"
+                    ),
+                ),
+            )
+        )
+        await ctx.send(view=view)
+
+    @time.autocomplete("timeframe")
+    async def timeframe_autocomplete(
+        self,
+        _interaction: discord.Interaction[Any],
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        query = current.strip().lower()[:32]
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in timeframe_choices(datetime.now(UTC))
+            if not query or query in name.lower()
+        ]
 
     @tasks.loop(seconds=30)
     async def watch(self) -> None:

@@ -24,11 +24,7 @@ class Economy(commands.Cog):
         5,
         commands.BucketType.user,
     )
-    @commands.hybrid_group(
-        name="funds",
-        fallback="balance",
-        description="Show the group's Robux and pending Robux.",
-    )  # type: ignore[arg-type]
+    @commands.hybrid_group(name="funds", fallback="balance")  # type: ignore[arg-type]
     async def funds(self, ctx: commands.Context[Any]) -> None:
         """Show the group's Robux and pending Robux."""
         ctx = require_context(ctx)

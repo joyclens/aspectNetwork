@@ -13,10 +13,17 @@ from bot import __version__
 from bot.core.config import Settings
 from bot.core.database import Database, connect
 from bot.core.ux import print_banner
+from bot.services.cookie import Cookie
 from bot.services.dock import Dock
 from bot.services.roblox import Roblox, RobloxError
 from bot.shared.context import Context, PromptDeclined
-from bot.shared.errors import deliver_trace, error_mentions, error_notice, remember_error
+from bot.shared.errors import (
+    DatabaseUnavailable,
+    deliver_trace,
+    error_mentions,
+    error_notice,
+    remember_error,
+)
 from bot.shared.http import session
 
 logger = logging.getLogger("aspect")
@@ -49,6 +56,7 @@ class Aspect(commands.Bot):
         self.db: Database | None = None
         self.roblox: Roblox | None = None
         self.dock: Dock | None = None
+        self.cookie: Cookie | None = None
         self.db_version = ""
         self._locks: dict[str, asyncio.Lock] = {}
         self.traceback: dict[str, BaseException] = {}
@@ -101,7 +109,7 @@ class Aspect(commands.Bot):
             self.session,
         )
         await self.roblox.start()
-        await asyncio.gather(self._check_roblox(), self._start_dock())
+        await asyncio.gather(self._check_roblox(), self._start_dock(), self._start_cookie())
         await self._load_extensions()
 
     async def on_ready(self) -> None:
@@ -131,6 +139,8 @@ class Aspect(commands.Bot):
             await self.roblox.close()
         if self.dock is not None:
             await self.dock.close()
+        if self.cookie is not None:
+            await self.cookie.close()
         if self.session is not None and not self.session.closed:
             await self.session.close()
         if self.db is not None:
@@ -180,6 +190,12 @@ class Aspect(commands.Bot):
             if isinstance(exception, commands.UserInputError):
                 await context.warn("That input is not valid.")
                 return
+            if isinstance(exception, DatabaseUnavailable):
+                code = remember_error(self.traceback, exception, where="Database")
+                await context.warn(error_notice(code), allowed_mentions=error_mentions())
+                if await self.is_owner(context.author):
+                    await deliver_trace(context.author, self.settings, exception)
+                return
             if isinstance(exception, commands.CheckFailure):
                 await context.warn("You cannot use that here.")
                 return
@@ -212,6 +228,15 @@ class Aspect(commands.Bot):
             return
         self.dock = Dock(key.get_secret_value(), pid, self.session)
         await self.dock.start()
+
+    async def _start_cookie(self) -> None:
+        key = self.settings.cookie_api_key
+        if key is None:
+            return
+        if self.session is None:
+            logger.warning("Cookie transcripts are missing their http session")
+            return
+        self.cookie = Cookie(key.get_secret_value(), self.session)
 
     async def _sync_commands(self) -> None:
         guild = discord.Object(id=self.settings.discord_guild_id)

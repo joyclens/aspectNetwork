@@ -57,7 +57,11 @@ class VerifyButton(discord.ui.Button[Any]):
             if not isinstance(cog, Verification):
                 logger.error("Verification cog is not loaded")
                 await interaction.followup.send(
-                    view=container_view(discord.ui.TextDisplay("**Sorry!** We're currently undergoing maintenance, please try again later.")),
+                    view=container_view(
+                        discord.ui.TextDisplay(
+                            "**Sorry!** We're currently undergoing maintenance, please try again later."
+                        )
+                    ),
                     ephemeral=True,
                 )
                 return
@@ -122,7 +126,11 @@ class _Continue(discord.ui.Button[Any]):
                 logger.error("Verification cog is not loaded")
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        view=container_view(discord.ui.TextDisplay("**Sorry!** We're currently undergoing maintenance, please try again later.")),
+                        view=container_view(
+                            discord.ui.TextDisplay(
+                                "**Sorry!** We're currently undergoing maintenance, please try again later."
+                            )
+                        ),
                         ephemeral=True,
                     )
                 return
@@ -206,7 +214,11 @@ class Verification(commands.Cog):
                 self.bot.settings.discord_guild_id,
             )
             await interaction.followup.send(
-                view=container_view(discord.ui.TextDisplay("**Sorry!** We're currently undergoing maintenance, please try again later.")),
+                view=container_view(
+                    discord.ui.TextDisplay(
+                        "**Sorry!** We're currently undergoing maintenance, please try again later."
+                    )
+                ),
                 ephemeral=True,
             )
             return
@@ -214,7 +226,11 @@ class Verification(commands.Cog):
         if dock is None or self.bot.roblox is None:
             logger.error("Verification services are not ready")
             await interaction.followup.send(
-                view=container_view(discord.ui.TextDisplay("**Sorry!** We're currently undergoing maintenance, please try again later.")),
+                view=container_view(
+                    discord.ui.TextDisplay(
+                        "**Sorry!** We're currently undergoing maintenance, please try again later."
+                    )
+                ),
                 ephemeral=True,
             )
             return
@@ -328,7 +344,11 @@ class Verification(commands.Cog):
                 interaction.guild_id,
                 self.bot.settings.discord_guild_id,
             )
-            notice = container_view(discord.ui.TextDisplay("**Sorry!** We're currently undergoing maintenance, please try again later."))
+            notice = container_view(
+                discord.ui.TextDisplay(
+                    "**Sorry!** We're currently undergoing maintenance, please try again later."
+                )
+            )
             if interaction.response.is_done():
                 await interaction.followup.send(view=notice, ephemeral=True)
             else:

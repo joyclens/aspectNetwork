@@ -7,12 +7,18 @@ import traceback
 from typing import Any
 
 import discord
+from discord.ext import commands
 
 from bot.core.logging import secret_values
 
 logger = logging.getLogger("aspect")
 
 _REPORT_USER = 1465469795813298287
+
+
+class DatabaseUnavailable(commands.CheckFailure):
+    def __init__(self) -> None:
+        super().__init__("Database is unavailable")
 
 
 def error_notice(code: str) -> str:
