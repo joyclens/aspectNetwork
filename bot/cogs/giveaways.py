@@ -4,7 +4,7 @@ import contextlib
 import logging
 import random
 import re
-from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, NamedTuple
 
@@ -13,12 +13,12 @@ from discord import app_commands, ui
 from discord.ext import commands, tasks
 
 from bot.core.bot import Aspect
-from bot.core.database import Giveaway
+from bot.core.database import Giveaway, SponsoredServer
 from bot.shared.checks import database
 from bot.shared.context import require_context
 from bot.shared.converters import Duration
 from bot.shared.errors import DatabaseUnavailable, report_interaction
-from bot.shared.layout import container_view
+from bot.shared.layout import AspectLayout, container_view
 
 logger = logging.getLogger("aspect")
 
@@ -26,27 +26,29 @@ Ctx = commands.Context[Any]
 Interaction = discord.Interaction[Any]
 Mode = Literal["add", "edit", "remove"]
 
-EMBED_COLOR = 0xFF3171
 MAX_ACTIVE = 5
 PARTICIPANT_PAGE = 40
+FOOTER = (
+    "https://cdn.discordapp.com/attachments/1553889994538750133/"
+    "1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
+    "?ex=6acf58a0&is=6ace0720&hm=4b79fc195d2f294319e01d01a76782756319a8d26e95abc78e1aed22d3db5ecd&"
+)
 FLAG_PATTERN = re.compile(
-    r"--(?P<flag>role|bonus|ignore|server)\s+(?P<value>.+?)(?=\s--|\s*$)",
+    r"--(?P<flag>role|ignore|server)\s+(?P<value>.+?)(?=\s--|\s*$)",
     re.IGNORECASE,
 )
 
 
 class Requirement(NamedTuple):
     column: str
-    field: str
     label: str
     limit: int
 
 
 REQUIREMENTS = {
-    "bonus": Requirement("bonus_roles", "Bonus", "bonus roles", 5),
-    "role": Requirement("required_roles", "Role", "required roles", 5),
-    "server": Requirement("required_servers", "Server", "sponsored servers", 3),
-    "ignore": Requirement("ignore_roles", "Ignore", "ignore roles", 5),
+    "role": Requirement("required_roles", "required roles", 5),
+    "ignore": Requirement("ignore_roles", "restricted roles", 5),
+    "server": Requirement("required_servers", "sponsored servers", 3),
 }
 
 
@@ -58,90 +60,13 @@ def role_mentions(role_ids: list[int]) -> str:
     return " ".join(f"<@&{role_id}>" for role_id in role_ids)
 
 
-def server_label(bot: Aspect, server_id: int) -> str:
-    guild = bot.get_guild(server_id)
-    return guild.name if guild else f"`{server_id}`"
-
-
-def in_server(bot: Aspect, server_id: int, user_id: int) -> bool:
-    guild = bot.get_guild(server_id)
-    return guild is not None and guild.get_member(user_id) is not None
-
-
 def has_any_role(member: discord.Member, role_ids: list[int]) -> bool:
     return any(member.get_role(role_id) for role_id in role_ids)
 
 
-def format_ids(bot: Aspect, flag: str, ids: list[int]) -> str:
-    if flag == "server":
-        return ", ".join(server_label(bot, server_id) for server_id in ids)
-    return role_mentions(ids)
-
-
-def requirements_of(row: Giveaway) -> dict[str, list[int] | None]:
-    return {
-        requirement.column: getattr(row, requirement.column)
-        for requirement in REQUIREMENTS.values()
-    }
-
-
-def giveaway_description(
-    label: str,
-    moment: datetime,
-    host: str,
-    winners: int | str,
-) -> str:
-    stamp = int(moment.timestamp())
-    return (
-        f"**{label}:** <t:{stamp}> (<t:{stamp}:R>)\n"
-        f"**Hosted by:** {host}\n"
-        f"**Winners:** {winners}"
-    )
-
-
-def running_description(
-    row: Giveaway,
-    *,
-    finish: datetime | None = None,
-    host: str | None = None,
-    winners: int | None = None,
-) -> str:
-    return giveaway_description(
-        "Ends",
-        finish or row.finish,
-        host or user_mention(row.host_id),
-        winners or row.winners,
-    )
-
-
-def build_embed(
-    bot: Aspect,
-    *,
-    title: str,
-    description: str,
-    entries: int,
-    requirements: dict[str, list[int] | None],
-) -> discord.Embed:
-    embed = discord.Embed(color=EMBED_COLOR, title=title, description=description)
-    embed.add_field(name="Entries", value=str(entries))
-    for flag, requirement in REQUIREMENTS.items():
-        if ids := requirements.get(requirement.column):
-            embed.add_field(name=requirement.field, value=format_ids(bot, flag, ids))
-    return embed
-
-
-def update_field(embed: discord.Embed, name: str, value: str | None) -> None:
-    index = next(
-        (i for i, field in enumerate(embed.fields) if (field.name or "").lower() == name.lower()),
-        None,
-    )
-    if value is None:
-        if index is not None:
-            embed.remove_field(index)
-    elif index is None:
-        embed.add_field(name=name, value=value)
-    else:
-        embed.set_field_at(index, name=name, value=value)
+def stamp(moment: datetime) -> str:
+    value = int(moment.timestamp())
+    return f"<t:{value}:R>"
 
 
 def parse_flags(prize: str) -> tuple[str, dict[str, str]]:
@@ -156,12 +81,50 @@ async def parse_roles(ctx: Ctx, raw: str) -> list[discord.Role]:
     return [await converter.convert(ctx, token) for token in raw.split()]
 
 
+async def resolve_server(bot: Aspect, token: str) -> SponsoredServer | None:
+    if token.isdigit():
+        return None
+    code = discord.utils.resolve_invite(token).code.split("?")[0]
+    if not code:
+        return None
+    try:
+        invite = await bot.fetch_invite(code)
+    except discord.HTTPException:
+        return None
+    guild = invite.guild
+    name = (
+        guild.name
+        if isinstance(guild, discord.Guild | discord.PartialInviteGuild)
+        else code
+    )
+    return SponsoredServer(name=name, invite=f"https://discord.gg/{invite.code}")
+
+
 def merge_ids(current: list[int], ids: list[int], mode: Mode) -> list[int]:
     if mode == "remove":
         return [item for item in current if item not in ids]
     if mode == "edit":
         return ids
     return list(dict.fromkeys(current + ids))
+
+
+def merge_servers(
+    current: list[SponsoredServer],
+    servers: list[SponsoredServer],
+    mode: Mode,
+) -> list[SponsoredServer]:
+    if mode == "remove":
+        remove = {server.invite for server in servers}
+        return [server for server in current if server.invite not in remove]
+    if mode == "edit":
+        return servers
+    seen = {server.invite for server in current}
+    merged = list(current)
+    for server in servers:
+        if server.invite not in seen:
+            merged.append(server)
+            seen.add(server.invite)
+    return merged
 
 
 def draw_winners(entries: list[int], count: int) -> list[int]:
@@ -174,20 +137,108 @@ def draw_winners(entries: list[int], count: int) -> list[int]:
     return winners
 
 
-def entry_block(bot: Aspect, member: discord.Member, row: Giveaway) -> str | None:
-    blocked = next((role_id for role_id in row.ignore_roles or [] if member.get_role(role_id)), None)
+def entry_block(member: discord.Member, row: Giveaway) -> str | None:
+    blocked = next(
+        (role_id for role_id in row.ignore_roles or [] if member.get_role(role_id)),
+        None,
+    )
     if blocked is not None:
         return f"You can't join this giveaway with {role_mentions([blocked])}."
     if row.required_roles and not has_any_role(member, row.required_roles):
         return "You need one of these roles to join: " + role_mentions(row.required_roles)
-    missing = [
-        server_label(bot, server_id)
-        for server_id in row.required_servers or []
-        if not in_server(bot, server_id, member.id)
-    ]
-    if missing:
-        return "Join these servers to enter: " + ", ".join(missing)
     return None
+
+
+def server_reminder(row: Giveaway) -> str | None:
+    if not row.required_servers:
+        return None
+    links = " · ".join(f"[**{server.name}**]({server.invite})" for server in row.required_servers)
+    return f"Remember to join the required server(s): {links}"
+
+
+def requirements_text(row: Giveaway) -> str | None:
+    lines: list[str] = []
+    if row.required_servers:
+        servers = " · ".join(
+            f"[**{server.name}**]({server.invite})" for server in row.required_servers
+        )
+        lines.append(f"<:discord:1551257778109284352>  **Required Server:** {servers}")
+    if row.required_roles:
+        lines.append(
+            "<:userLocked:1559577156399529984> **Required Role:** "
+            + role_mentions(row.required_roles)
+        )
+    if row.ignore_roles:
+        lines.append(
+            "<:userSlash:1559577141216157746> **Restricted Role:** "
+            + role_mentions(row.ignore_roles)
+        )
+    return "\n".join(lines) if lines else None
+
+
+def giveaway_layout(
+    row: Giveaway,
+    *,
+    entries: int | None = None,
+    ended: bool = False,
+    winners: str | None = None,
+) -> AspectLayout:
+    count = len(set(row.members)) if entries is None else entries
+    when = stamp(datetime.now(UTC) if ended else row.finish)
+    duration_label = "Ended" if ended else "Duration"
+    winner_value = winners if winners is not None else str(row.winners)
+    header = (
+        f"## <:giveaway:1551256171728347279> {row.title}\n"
+        f"<:confetti:1551256166074687519>  **Winners:** `{winner_value}`\n"
+        f"<:event:1551256173901250580> **{duration_label}:** {when}\n"
+        f"<:people:1551256195585540306> **Entries:** `{count:,}`"
+    )
+    items: list[ui.Item[Any]] = [ui.TextDisplay(header)]
+    reqs = requirements_text(row)
+    if reqs is not None:
+        items.extend(
+            [
+                ui.Separator(visible=False),
+                ui.TextDisplay(reqs),
+            ]
+        )
+    items.extend(
+        [
+            ui.Separator(visible=False),
+            ui.TextDisplay(
+                "-# <:person:1551256197456330813> Giveaway hosted by " + user_mention(row.host_id)
+            ),
+        ]
+    )
+    if ended:
+        items.append(
+            ui.ActionRow(
+                ui.Button(
+                    label="Participants",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="giveaway:participants_ended",
+                )
+            )
+        )
+    else:
+        items.append(
+            ui.ActionRow(
+                ui.Button(
+                    emoji="<:confetti:1551256166074687519>",
+                    style=discord.ButtonStyle.gray,
+                    custom_id="giveaway:join",
+                ),
+                ui.Button(
+                    label="Participants",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="giveaway:participants",
+                ),
+            )
+        )
+    items.append(ui.MediaGallery(discord.MediaGalleryItem(FOOTER)))
+    view = AspectLayout(timeout=None)
+    view.add_item(ui.Container(*items))
+    return view
 
 
 async def respond(interaction: Interaction, text: str) -> None:
@@ -209,13 +260,9 @@ async def ready_client(interaction: Interaction) -> Aspect | None:
     return client
 
 
-async def sync_entries(message: discord.Message, count: int) -> None:
-    if not message.embeds or not message.embeds[0].fields:
-        return
-    embed = message.embeds[0]
-    embed.set_field_at(0, name="Entries", value=str(count))
+async def refresh_message(bot: Aspect, message: discord.Message, row: Giveaway) -> None:
     with contextlib.suppress(discord.HTTPException):
-        await message.edit(embed=embed)
+        await message.edit(view=giveaway_layout(row), embed=None)
 
 
 async def show_participants(interaction: Interaction, *, ended: bool) -> None:
@@ -237,13 +284,10 @@ async def show_participants(interaction: Interaction, *, ended: bool) -> None:
     if not members:
         await respond(interaction, "This giveaway has no participants yet.")
         return
-    lines = [
-        user_mention(user_id) + (" (Bonus)" if count > 1 else "")
-        for user_id, count in Counter(members).items()
-    ]
-    body = "\n".join(lines[:PARTICIPANT_PAGE])
-    if len(lines) > PARTICIPANT_PAGE:
-        body += f"\n…and {len(lines) - PARTICIPANT_PAGE} more"
+    unique = list(dict.fromkeys(members))
+    body = "\n".join(user_mention(user_id) for user_id in unique[:PARTICIPANT_PAGE])
+    if len(unique) > PARTICIPANT_PAGE:
+        body += f"\n…and {len(unique) - PARTICIPANT_PAGE} more"
     await respond(interaction, f"## Participants\n{body}")
 
 
@@ -266,7 +310,7 @@ class LeaveView(ui.View):
             return
         members = [user_id for user_id in row.members if user_id != self.member_id]
         await db.set_giveaway_members(self.message.id, members)
-        await sync_entries(self.message, len(set(members)))
+        await refresh_message(self.bot, self.message, replace(row, members=members))
         await respond(interaction, "You left the giveaway.")
 
 
@@ -274,7 +318,11 @@ class GiveawayView(ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=None)
 
-    @ui.button(emoji="🎉", style=discord.ButtonStyle.blurple, custom_id="giveaway:join")
+    @ui.button(
+        emoji="<:confetti:1551256166074687519>",
+        style=discord.ButtonStyle.gray,
+        custom_id="giveaway:join",
+    )
     async def join(self, interaction: Interaction, _button: ui.Button[Any]) -> None:
         client = await ready_client(interaction)
         member = interaction.user
@@ -292,7 +340,7 @@ class GiveawayView(ui.View):
         if row is None:
             await respond(interaction, "This giveaway does not exist or has been removed.")
             return
-        if reason := entry_block(client, member, row):
+        if reason := entry_block(member, row):
             await respond(interaction, reason)
             return
         if member.id in row.members:
@@ -302,16 +350,14 @@ class GiveawayView(ui.View):
                 ephemeral=True,
             )
             return
-        bonus = has_any_role(member, row.bonus_roles or [])
-        members = [*row.members, *([member.id] * (2 if bonus else 1))]
+        members = [*row.members, member.id]
         await db.set_giveaway_members(message.id, members)
-        await sync_entries(message, len(set(members)))
-        await respond(
-            interaction,
-            "You joined the giveaway with **double chances**!"
-            if bonus
-            else "You joined the giveaway.",
-        )
+        await refresh_message(client, message, replace(row, members=members))
+        reminder = server_reminder(row)
+        text = "You joined the giveaway."
+        if reminder is not None:
+            text = f"{text}\n{reminder}"
+        await respond(interaction, text)
 
     @ui.button(
         label="Participants",
@@ -352,23 +398,14 @@ async def announce_result(bot: Aspect, row: Giveaway, message: discord.Message) 
     winners = draw_winners(row.members, row.winners)
     if len(winners) < row.winners:
         winners = []
-        result = f"{row.winners}\n\n> Not enough entries to determine the winners!"
+        result = "None"
     else:
         result = ", ".join(user_mention(user_id) for user_id in winners)
-    embed = build_embed(
-        bot,
-        title=row.title,
-        description=giveaway_description(
-            "Ended",
-            datetime.now(UTC),
-            user_mention(row.host_id),
-            result,
-        ),
-        entries=len(set(row.members)),
-        requirements=requirements_of(row),
-    )
     try:
-        await message.edit(embed=embed, view=GiveawayEndedView())
+        await message.edit(
+            view=giveaway_layout(row, ended=True, winners=result),
+            embed=None,
+        )
     except discord.HTTPException:
         logger.warning("Could not edit ended giveaway %s", row.message_id)
     if winners:
@@ -413,70 +450,38 @@ class Giveaways(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def active_giveaway(self, ctx: Ctx, message: discord.Message) -> Giveaway | None:
-        ctx = require_context(ctx)
-        if ctx.guild is None:
+        reply = require_context(ctx)
+        if reply.guild is None:
             return None
-        row = await database(self.bot).giveaway(ctx.guild.id, message.id)
+        row = await database(self.bot).giveaway(reply.guild.id, message.id)
         if row is None:
-            await ctx.warn("This message is not a giveaway or it already ended.")
+            await reply.warn("This message is not a giveaway or it already ended.")
         return row
 
-    async def editable(
-        self,
-        ctx: Ctx,
-        message: discord.Message,
-    ) -> tuple[Giveaway, discord.Embed] | None:
-        row = await self.active_giveaway(ctx, message)
-        if row is None or not message.embeds:
-            return None
-        return row, message.embeds[0]
+    async def refresh(self, ctx: Ctx, message: discord.Message, row: Giveaway) -> None:
+        await refresh_message(self.bot, message, row)
+        await require_context(ctx).approve(f"Updated [giveaway]({message.jump_url}).")
 
-    async def parse_ids(
-        self,
-        ctx: Ctx,
-        flag: str,
-        raw: str,
-        *,
-        verify: bool,
-    ) -> list[int] | None:
-        ctx = require_context(ctx)
-        if flag != "server":
-            try:
-                return [role.id for role in await parse_roles(ctx, raw)]
-            except commands.BadArgument:
-                await ctx.warn("Invalid role(s) provided.")
+    async def parse_role_ids(self, ctx: Ctx, raw: str) -> list[int] | None:
+        reply = require_context(ctx)
+        try:
+            return [role.id for role in await parse_roles(ctx, raw)]
+        except commands.BadArgument:
+            await reply.warn("Invalid role(s) provided.")
+            return None
+
+    async def parse_servers(self, ctx: Ctx, raw: str) -> list[SponsoredServer] | None:
+        reply = require_context(ctx)
+        servers: list[SponsoredServer] = []
+        for token in raw.split():
+            server = await resolve_server(self.bot, token)
+            if server is None:
+                await reply.warn(
+                    f"Invalid Discord invite: `{token}`, use a link like `https://discord.gg/aspect`."
+                )
                 return None
-        tokens = raw.split()
-        if not all(token.isdigit() for token in tokens):
-            await ctx.warn("Invalid server id(s) provided.")
-            return None
-        ids = [int(token) for token in tokens]
-        unknown = next((i for i in ids if verify and self.bot.get_guild(i) is None), None)
-        if unknown is not None:
-            await ctx.warn(f"I'm not in server `{unknown}`, so it can't be required.")
-            return None
-        return ids
-
-    async def resolve_ids(
-        self,
-        ctx: Ctx,
-        flag: str,
-        raw: str,
-        current: list[int],
-        mode: Mode,
-    ) -> list[int] | None:
-        ctx = require_context(ctx)
-        if mode == "remove" and raw.lower() == "all":
-            return []
-        ids = await self.parse_ids(ctx, flag, raw, verify=mode != "remove")
-        if ids is None:
-            return None
-        updated = merge_ids(current, ids, mode)
-        requirement = REQUIREMENTS[flag]
-        if len(updated) > requirement.limit:
-            await ctx.warn(f"You can only set up to {requirement.limit} {requirement.label}.")
-            return None
-        return updated
+            servers.append(server)
+        return servers
 
     async def mutate_requirement(
         self,
@@ -486,28 +491,65 @@ class Giveaways(commands.Cog):
         value: str,
         mode: Mode,
     ) -> None:
-        ctx = require_context(ctx)
+        reply = require_context(ctx)
         flag = flag.lower()
         requirement = REQUIREMENTS.get(flag)
         if requirement is None:
-            await ctx.warn("Invalid flag. Use `role`, `bonus`, `ignore`, or `server`.")
+            await reply.warn("Invalid flag. Use `role`, `ignore`, or `server`.")
             return
-        target = await self.editable(ctx, message)
-        if target is None:
+        row = await self.active_giveaway(ctx, message)
+        if row is None:
             return
-        row, embed = target
-        current = list(getattr(row, requirement.column) or [])
-        updated = await self.resolve_ids(ctx, flag, value, current, mode)
-        if updated is None:
-            return
-        await database(self.bot).set_giveaway_roles(message.id, requirement.column, updated or None)
-        update_field(
-            embed,
-            requirement.field,
-            format_ids(self.bot, flag, updated) if updated else None,
-        )
-        await message.edit(embed=embed)
-        await ctx.approve(f"Updated {flag} requirement on [giveaway]({message.jump_url}).")
+        db = database(self.bot)
+        if flag == "server":
+            current = list(row.required_servers or [])
+            if mode == "remove" and value.lower() == "all":
+                updated_servers: list[SponsoredServer] = []
+            else:
+                parsed = await self.parse_servers(ctx, value)
+                if parsed is None:
+                    return
+                updated_servers = merge_servers(current, parsed, mode)
+            if len(updated_servers) > requirement.limit:
+                await reply.warn(
+                    f"You can only set up to {requirement.limit} {requirement.label}."
+                )
+                return
+            await db.set_giveaway_servers(message.id, updated_servers or None)
+            row = replace(row, required_servers=updated_servers or None)
+        elif flag == "role":
+            current_ids = list(row.required_roles or [])
+            if mode == "remove" and value.lower() == "all":
+                updated_ids: list[int] = []
+            else:
+                parsed_ids = await self.parse_role_ids(ctx, value)
+                if parsed_ids is None:
+                    return
+                updated_ids = merge_ids(current_ids, parsed_ids, mode)
+            if len(updated_ids) > requirement.limit:
+                await reply.warn(
+                    f"You can only set up to {requirement.limit} {requirement.label}."
+                )
+                return
+            await db.set_giveaway_roles(message.id, "required_roles", updated_ids or None)
+            row = replace(row, required_roles=updated_ids or None)
+        else:
+            current_ids = list(row.ignore_roles or [])
+            if mode == "remove" and value.lower() == "all":
+                updated_ids = []
+            else:
+                parsed_ids = await self.parse_role_ids(ctx, value)
+                if parsed_ids is None:
+                    return
+                updated_ids = merge_ids(current_ids, parsed_ids, mode)
+            if len(updated_ids) > requirement.limit:
+                await reply.warn(
+                    f"You can only set up to {requirement.limit} {requirement.label}."
+                )
+                return
+            await db.set_giveaway_roles(message.id, "ignore_roles", updated_ids or None)
+            row = replace(row, ignore_roles=updated_ids or None)
+        await self.refresh(ctx, message, row)
 
     @commands.hybrid_group(  # type: ignore[arg-type]
         name="giveaway",
@@ -528,7 +570,7 @@ class Giveaways(commands.Cog):
             return
         lines = [
             f"[**{row.title}**](https://discord.com/channels/{ctx.guild.id}/"
-            f"{row.channel_id}/{row.message_id}) ends <t:{int(row.finish.timestamp())}:R>"
+            f"{row.channel_id}/{row.message_id}) ends {stamp(row.finish)}"
             for row in rows
         ]
         await ctx.send(
@@ -537,7 +579,7 @@ class Giveaways(commands.Cog):
             )
         )
 
-    @giveaway.command(
+    @giveaway.command(  # type: ignore[arg-type]
         name="create",
         description="Start a giveaway in a channel, with optional entry requirements.",
     )
@@ -545,7 +587,10 @@ class Giveaways(commands.Cog):
         channel="Channel the giveaway is posted in",
         duration="How long it runs, e.g. 12h or 2d",
         winners="Number of winners (1-20)",
-        prize="Prize name, then optional flags: --role --bonus --ignore --server",
+        prize="Prize name",
+        role="Optional required role(s)",
+        ignore="Optional roles blocked from entering",
+        server="Optional sponsored server invite, e.g. https://discord.gg/aspect",
     )
     @commands.has_permissions(manage_guild=True)
     async def create(
@@ -556,6 +601,9 @@ class Giveaways(commands.Cog):
         winners: commands.Range[int, 1, 20],
         *,
         prize: str,
+        role: str | None = None,
+        ignore: str | None = None,
+        server: str | None = None,
     ) -> None:
         ctx = require_context(ctx)
         db = database(self.bot)
@@ -566,28 +614,60 @@ class Giveaways(commands.Cog):
             await ctx.warn(f"You can't host more than **{MAX_ACTIVE}** giveaways at once.")
             return
         title, flags = parse_flags(prize)
+        for key, value in {"role": role, "ignore": ignore, "server": server}.items():
+            if value:
+                flags[key] = value
         if len(title) < 2:
             await ctx.warn("That prize is not valid.")
             return
-        requirements: dict[str, list[int] | None] = {
-            requirement.column: None for requirement in REQUIREMENTS.values()
-        }
-        for flag, raw in flags.items():
-            ids = await self.resolve_ids(ctx, flag, raw, [], "edit")
+        required_roles: list[int] | None = None
+        ignore_roles: list[int] | None = None
+        required_servers: list[SponsoredServer] | None = None
+        if "role" in flags:
+            ids = await self.parse_role_ids(ctx, flags["role"])
             if ids is None:
                 return
-            requirements[REQUIREMENTS[flag].column] = ids
+            if len(ids) > REQUIREMENTS["role"].limit:
+                await ctx.warn(
+                    f"You can only set up to {REQUIREMENTS['role'].limit} required roles."
+                )
+                return
+            required_roles = ids
+        if "ignore" in flags:
+            ids = await self.parse_role_ids(ctx, flags["ignore"])
+            if ids is None:
+                return
+            if len(ids) > REQUIREMENTS["ignore"].limit:
+                await ctx.warn(
+                    f"You can only set up to {REQUIREMENTS['ignore'].limit} restricted roles."
+                )
+                return
+            ignore_roles = ids
+        if "server" in flags:
+            servers = await self.parse_servers(ctx, flags["server"])
+            if servers is None:
+                return
+            if len(servers) > REQUIREMENTS["server"].limit:
+                await ctx.warn(
+                    f"You can only set up to {REQUIREMENTS['server'].limit} sponsored servers."
+                )
+                return
+            required_servers = servers
         finish = datetime.now(UTC) + timedelta(seconds=seconds)
-        message = await channel.send(
-            embed=build_embed(
-                self.bot,
-                title=title,
-                description=giveaway_description("Ends", finish, ctx.author.mention, winners),
-                entries=0,
-                requirements=requirements,
-            ),
-            view=GiveawayView(),
+        draft = Giveaway(
+            message_id=0,
+            guild_id=ctx.guild.id,
+            channel_id=channel.id,
+            winners=winners,
+            members=[],
+            finish=finish,
+            host_id=ctx.author.id,
+            title=title,
+            required_roles=required_roles,
+            ignore_roles=ignore_roles,
+            required_servers=required_servers,
         )
+        message = await channel.send(view=giveaway_layout(draft))
         await db.create_giveaway(
             message_id=message.id,
             guild_id=ctx.guild.id,
@@ -596,17 +676,17 @@ class Giveaways(commands.Cog):
             finish=finish,
             host_id=ctx.author.id,
             title=title,
-            **requirements,
+            required_roles=required_roles,
+            ignore_roles=ignore_roles,
+            required_servers=required_servers,
         )
         await ctx.approve(f"Giveaway started in {channel.mention}.")
 
-    @giveaway.command(
+    @giveaway.command(  # type: ignore[arg-type]
         name="end",
         description="End a giveaway now and draw its winners.",
     )
-    @app_commands.describe(
-        message="Giveaway message ID or link",
-    )
+    @app_commands.describe(message="Giveaway message ID or link")
     @commands.has_permissions(manage_guild=True)
     async def end(self, ctx: Ctx, message: discord.Message) -> None:
         ctx = require_context(ctx)
@@ -616,13 +696,11 @@ class Giveaways(commands.Cog):
         await end_giveaway(self.bot, row)
         await ctx.approve(f"Ended [giveaway]({message.jump_url}).")
 
-    @giveaway.command(
+    @giveaway.command(  # type: ignore[arg-type]
         name="delete",
         description="Delete a giveaway without drawing winners.",
     )
-    @app_commands.describe(
-        message="Giveaway message ID or link",
-    )
+    @app_commands.describe(message="Giveaway message ID or link")
     @commands.has_permissions(manage_guild=True)
     async def delete(self, ctx: Ctx, message: discord.Message) -> None:
         ctx = require_context(ctx)
@@ -633,7 +711,7 @@ class Giveaways(commands.Cog):
             await message.delete()
         await ctx.approve("The giveaway has been deleted.")
 
-    @giveaway.command(
+    @giveaway.command(  # type: ignore[arg-type]
         name="reroll",
         description="Draw new winners for a giveaway that has ended.",
     )
@@ -674,31 +752,25 @@ class Giveaways(commands.Cog):
         ctx = require_context(ctx)
         await ctx.warn("Use `prize`, `duration`, `host`, or `winners`.")
 
-    @edit.command(
+    @edit.command(  # type: ignore[arg-type]
         name="prize",
         description="Change the prize of a running giveaway.",
     )
-    @app_commands.describe(
-        message="Giveaway message ID or link",
-        prize="The new prize",
-    )
+    @app_commands.describe(message="Giveaway message ID or link", prize="The new prize")
     @commands.has_permissions(manage_guild=True)
     async def edit_prize(self, ctx: Ctx, message: discord.Message, *, prize: str) -> None:
         ctx = require_context(ctx)
-        target = await self.editable(ctx, message)
-        if target is None:
+        row = await self.active_giveaway(ctx, message)
+        if row is None:
             return
-        _, embed = target
         title = " ".join(prize.split())
         if len(title) < 2:
             await ctx.warn("That prize is not valid.")
             return
-        embed.title = title
-        await message.edit(embed=embed)
         await database(self.bot).set_giveaway_title(message.id, title)
-        await ctx.approve(f"Updated [giveaway]({message.jump_url}) prize to **{title}**.")
+        await self.refresh(ctx, message, replace(row, title=title))
 
-    @edit.command(
+    @edit.command(  # type: ignore[arg-type]
         name="duration",
         description="Restart a running giveaway's countdown with a new duration.",
     )
@@ -709,38 +781,29 @@ class Giveaways(commands.Cog):
     @commands.has_permissions(manage_guild=True)
     async def edit_duration(self, ctx: Ctx, message: discord.Message, duration: str) -> None:
         ctx = require_context(ctx)
-        target = await self.editable(ctx, message)
-        if target is None:
+        row = await self.active_giveaway(ctx, message)
+        if row is None:
             return
-        row, embed = target
         seconds = await Duration().convert(ctx, duration)
         finish = datetime.now(UTC) + timedelta(seconds=seconds)
-        embed.description = running_description(row, finish=finish)
-        await message.edit(embed=embed)
         await database(self.bot).set_giveaway_finish(message.id, finish)
-        await ctx.approve(f"Updated [giveaway]({message.jump_url}) duration.")
+        await self.refresh(ctx, message, replace(row, finish=finish))
 
-    @edit.command(
+    @edit.command(  # type: ignore[arg-type]
         name="host",
         description="Change who is shown as the host of a running giveaway.",
     )
-    @app_commands.describe(
-        message="Giveaway message ID or link",
-        host="The new host",
-    )
+    @app_commands.describe(message="Giveaway message ID or link", host="The new host")
     @commands.has_permissions(manage_guild=True)
     async def edit_host(self, ctx: Ctx, message: discord.Message, host: discord.User) -> None:
         ctx = require_context(ctx)
-        target = await self.editable(ctx, message)
-        if target is None:
+        row = await self.active_giveaway(ctx, message)
+        if row is None:
             return
-        row, embed = target
-        embed.description = running_description(row, host=host.mention)
-        await message.edit(embed=embed)
         await database(self.bot).set_giveaway_host(message.id, host.id)
-        await ctx.approve(f"Updated [giveaway]({message.jump_url}) host to **{host}**.")
+        await self.refresh(ctx, message, replace(row, host_id=host.id))
 
-    @edit.command(
+    @edit.command(  # type: ignore[arg-type]
         name="winners",
         description="Change how many winners a running giveaway draws.",
     )
@@ -756,14 +819,11 @@ class Giveaways(commands.Cog):
         winners: commands.Range[int, 1, 20],
     ) -> None:
         ctx = require_context(ctx)
-        target = await self.editable(ctx, message)
-        if target is None:
+        row = await self.active_giveaway(ctx, message)
+        if row is None:
             return
-        row, embed = target
-        embed.description = running_description(row, winners=winners)
-        await message.edit(embed=embed)
         await database(self.bot).set_giveaway_winners(message.id, winners)
-        await ctx.approve(f"Updated [giveaway]({message.jump_url}) winners to **{winners}**.")
+        await self.refresh(ctx, message, replace(row, winners=winners))
 
     @giveaway.group(  # type: ignore[arg-type]
         name="requirements",
@@ -773,18 +833,23 @@ class Giveaways(commands.Cog):
     @commands.has_permissions(manage_guild=True)
     async def requirements(self, ctx: Ctx) -> None:
         ctx = require_context(ctx)
-        await ctx.warn(
-            "Use `add`, `remove`, or `edit`. Flags: `role`, `bonus`, `ignore`, `server`."
-        )
+        await ctx.warn("Use `add`, `remove`, or `edit`. Flags: `role`, `ignore`, `server`.")
 
-    @requirements.command(
+    @requirements.command(  # type: ignore[arg-type]
         name="add",
         description="Add roles or servers to a giveaway's requirements.",
     )
     @app_commands.describe(
         message="Giveaway message ID or link",
-        flag="Requirement type: role, bonus, ignore or server",
-        value="Role mentions/IDs or server IDs, separated by spaces",
+        flag="Requirement type",
+        value="Roles, or Discord invites like https://discord.gg/aspect",
+    )
+    @app_commands.choices(
+        flag=[
+            app_commands.Choice(name="Role", value="role"),
+            app_commands.Choice(name="Ignore", value="ignore"),
+            app_commands.Choice(name="Server", value="server"),
+        ]
     )
     @commands.has_permissions(manage_guild=True)
     async def requirements_add(
@@ -797,14 +862,21 @@ class Giveaways(commands.Cog):
     ) -> None:
         await self.mutate_requirement(ctx, message, flag, value, "add")
 
-    @requirements.command(
+    @requirements.command(  # type: ignore[arg-type]
         name="edit",
         description="Replace one requirement of a giveaway with a new list.",
     )
     @app_commands.describe(
         message="Giveaway message ID or link",
-        flag="Requirement type: role, bonus, ignore or server",
-        value="Role mentions/IDs or server IDs, separated by spaces",
+        flag="Requirement type",
+        value="Roles, or Discord invites like https://discord.gg/aspect",
+    )
+    @app_commands.choices(
+        flag=[
+            app_commands.Choice(name="Role", value="role"),
+            app_commands.Choice(name="Ignore", value="ignore"),
+            app_commands.Choice(name="Server", value="server"),
+        ]
     )
     @commands.has_permissions(manage_guild=True)
     async def requirements_edit(
@@ -817,14 +889,21 @@ class Giveaways(commands.Cog):
     ) -> None:
         await self.mutate_requirement(ctx, message, flag, value, "edit")
 
-    @requirements.command(
+    @requirements.command(  # type: ignore[arg-type]
         name="remove",
         description="Remove roles or servers from a giveaway's requirements.",
     )
     @app_commands.describe(
         message="Giveaway message ID or link",
-        flag="Requirement type: role, bonus, ignore or server",
-        value="Roles or server IDs to remove, or `all` to clear the requirement",
+        flag="Requirement type",
+        value="Roles/invites to remove, or `all` to clear",
+    )
+    @app_commands.choices(
+        flag=[
+            app_commands.Choice(name="Role", value="role"),
+            app_commands.Choice(name="Ignore", value="ignore"),
+            app_commands.Choice(name="Server", value="server"),
+        ]
     )
     @commands.has_permissions(manage_guild=True)
     async def requirements_remove(

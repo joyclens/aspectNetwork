@@ -25,6 +25,12 @@ class Ticket:
 
 
 @dataclass(frozen=True, slots=True)
+class SponsoredServer:
+    name: str
+    invite: str
+
+
+@dataclass(frozen=True, slots=True)
 class Giveaway:
     message_id: int
     guild_id: int
@@ -35,9 +41,8 @@ class Giveaway:
     host_id: int
     title: str
     required_roles: list[int] | None
-    bonus_roles: list[int] | None
     ignore_roles: list[int] | None
-    required_servers: list[int] | None
+    required_servers: list[SponsoredServer] | None
 
 
 def _ids(value: Any) -> list[int] | None:
@@ -46,14 +51,34 @@ def _ids(value: Any) -> list[int] | None:
     if isinstance(value, str | bytes | bytearray):
         value = json.loads(value)
     if isinstance(value, list):
-        return [int(item) for item in value]
+        return [int(item) for item in value if not isinstance(item, dict)]
     if isinstance(value, int):
         return [value]
     return None
 
 
+def _servers(value: Any) -> list[SponsoredServer] | None:
+    if value is None:
+        return None
+    if isinstance(value, str | bytes | bytearray):
+        value = json.loads(value)
+    if not isinstance(value, list):
+        return None
+    servers: list[SponsoredServer] = []
+    for item in value:
+        if isinstance(item, dict) and item.get("name") and item.get("invite"):
+            servers.append(SponsoredServer(name=str(item["name"]), invite=str(item["invite"])))
+    return servers or None
+
+
 def _member_ids(value: Any) -> list[int]:
     return _ids(value) or []
+
+
+def _dump_servers(servers: list[SponsoredServer] | None) -> str | None:
+    if not servers:
+        return None
+    return json.dumps([{"name": server.name, "invite": server.invite} for server in servers])
 
 
 def _sale(row: Any) -> Sale | None:
@@ -86,9 +111,8 @@ def _giveaway(row: Any) -> Giveaway:
         host_id=int(row["host_id"]),
         title=str(row["title"]),
         required_roles=_ids(row["required_roles"]),
-        bonus_roles=_ids(row["bonus_roles"]),
         ignore_roles=_ids(row["ignore_roles"]),
-        required_servers=_ids(row["required_servers"]),
+        required_servers=_servers(row["required_servers"]),
     )
 
 
@@ -303,7 +327,7 @@ class Database:
         row = await self._pool.fetchrow(
             """
             SELECT message_id, guild_id, channel_id, winners, members, finish, host_id,
-                   title, required_roles, bonus_roles, ignore_roles, required_servers
+                   title, required_roles, ignore_roles, required_servers
             FROM giveaways
             WHERE guild_id = $1 AND message_id = $2
             """,
@@ -316,7 +340,7 @@ class Database:
         row = await self._pool.fetchrow(
             """
             SELECT message_id, guild_id, channel_id, winners, members, finish, host_id,
-                   title, required_roles, bonus_roles, ignore_roles, required_servers
+                   title, required_roles, ignore_roles, required_servers
             FROM giveaways
             WHERE message_id = $1
             """,
@@ -328,7 +352,7 @@ class Database:
         rows = await self._pool.fetch(
             """
             SELECT message_id, guild_id, channel_id, winners, members, finish, host_id,
-                   title, required_roles, bonus_roles, ignore_roles, required_servers
+                   title, required_roles, ignore_roles, required_servers
             FROM giveaways
             WHERE guild_id = $1
             ORDER BY finish ASC
@@ -348,7 +372,7 @@ class Database:
         rows = await self._pool.fetch(
             """
             SELECT message_id, guild_id, channel_id, winners, members, finish, host_id,
-                   title, required_roles, bonus_roles, ignore_roles, required_servers
+                   title, required_roles, ignore_roles, required_servers
             FROM giveaways
             WHERE finish <= $1
             """,
@@ -367,18 +391,17 @@ class Database:
         host_id: int,
         title: str,
         required_roles: list[int] | None,
-        bonus_roles: list[int] | None,
         ignore_roles: list[int] | None,
-        required_servers: list[int] | None,
+        required_servers: list[SponsoredServer] | None,
     ) -> None:
         await self._pool.execute(
             """
             INSERT INTO giveaways (
                 message_id, guild_id, channel_id, winners, members, finish, host_id, title,
-                required_roles, bonus_roles, ignore_roles, required_servers
+                required_roles, ignore_roles, required_servers
             ) VALUES (
                 $1, $2, $3, $4, '[]'::jsonb, $5, $6, $7,
-                $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb
+                $8::jsonb, $9::jsonb, $10::jsonb
             )
             """,
             message_id,
@@ -389,9 +412,8 @@ class Database:
             host_id,
             title,
             json.dumps(required_roles) if required_roles else None,
-            json.dumps(bonus_roles) if bonus_roles else None,
             json.dumps(ignore_roles) if ignore_roles else None,
-            json.dumps(required_servers) if required_servers else None,
+            _dump_servers(required_servers),
         )
 
     async def set_giveaway_members(self, message_id: int, members: list[int]) -> None:
@@ -435,16 +457,22 @@ class Database:
         column: str,
         role_ids: list[int] | None,
     ) -> None:
-        if column not in {
-            "required_roles",
-            "bonus_roles",
-            "ignore_roles",
-            "required_servers",
-        }:
+        if column not in {"required_roles", "ignore_roles"}:
             raise ValueError(f"invalid giveaway column: {column}")
         await self._pool.execute(
             f"UPDATE giveaways SET {column} = $1::jsonb WHERE message_id = $2",
             json.dumps(role_ids) if role_ids else None,
+            message_id,
+        )
+
+    async def set_giveaway_servers(
+        self,
+        message_id: int,
+        servers: list[SponsoredServer] | None,
+    ) -> None:
+        await self._pool.execute(
+            "UPDATE giveaways SET required_servers = $1::jsonb WHERE message_id = $2",
+            _dump_servers(servers),
             message_id,
         )
 
