@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
@@ -30,9 +31,7 @@ logger = logging.getLogger("aspect")
 
 ContextT = TypeVar("ContextT", bound=commands.Context[Any])
 
-
-jishaku.flags.RETAIN = True
-jishaku.flags.NO_DM_TRACEBACK = False
+os.environ.setdefault("JISHAKU_RETAIN", "1")
 
 
 def _discover(folder: str) -> list[str]:
@@ -115,8 +114,6 @@ class Aspect(commands.Bot):
         await self.roblox.start()
         await asyncio.gather(self._check_roblox(), self._start_dock(), self._start_cookie())
         await self._load_extensions()
-        await self.load_extension("jishaku")
-   
 
     async def on_ready(self) -> None:
         if self._banner_printed or self.user is None:
@@ -153,6 +150,12 @@ class Aspect(commands.Bot):
             await self.db.close()
 
     async def _load_extensions(self) -> None:
+        try:
+            await self.load_extension("jishaku")
+        except commands.ExtensionError:
+            logger.error("Error loading extension jishaku", exc_info=True)
+        else:
+            logger.info("Loaded jishaku")
         for module in _discover("cogs") + _discover("events"):
             try:
                 await self.load_extension(module)
