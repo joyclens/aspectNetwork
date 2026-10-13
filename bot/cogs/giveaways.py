@@ -37,6 +37,9 @@ FLAG_PATTERN = re.compile(
     r"--(?P<flag>role|ignore|server)\s+(?P<value>.+?)(?=\s--|\s*$)",
     re.IGNORECASE,
 )
+INVITE_PATTERN = re.compile(
+    r"(?i)(?:https?://)?(?:www\.)?(?:discord(?:app)?\.com/invite|discord\.gg)/([a-z0-9-]+)"
+)
 
 
 class Requirement(NamedTuple):
@@ -66,7 +69,7 @@ def has_any_role(member: discord.Member, role_ids: list[int]) -> bool:
 
 def stamp(moment: datetime) -> str:
     value = int(moment.timestamp())
-    return f"<t:{value}:R>"
+    return f"<t:{value}:f> (<t:{value}:R>)"
 
 
 def parse_flags(prize: str) -> tuple[str, dict[str, str]]:
@@ -81,22 +84,32 @@ async def parse_roles(ctx: Ctx, raw: str) -> list[discord.Role]:
     return [await converter.convert(ctx, token) for token in raw.split()]
 
 
+def invite_code(token: str) -> str | None:
+    cleaned = token.strip().strip("<>").rstrip(".,);]")
+    if cleaned.isdigit():
+        return None
+    match = INVITE_PATTERN.search(cleaned)
+    if match is not None:
+        return match.group(1)
+    if re.fullmatch(r"[a-zA-Z0-9-]{2,32}", cleaned):
+        return cleaned
+    try:
+        return discord.utils.resolve_invite(cleaned).code.split("?")[0] or None
+    except ValueError:
+        return None
+
+
 async def resolve_server(bot: Aspect, token: str) -> SponsoredServer | None:
-    if token.isdigit():
+    code = invite_code(token)
+    if code is None:
         return None
-    code = discord.utils.resolve_invite(token).code.split("?")[0]
-    if not code:
-        return None
+    url = f"https://discord.gg/{code}"
     try:
         invite = await bot.fetch_invite(code)
     except discord.HTTPException:
-        return None
+        return SponsoredServer(name=code, invite=url)
     guild = invite.guild
-    name = (
-        guild.name
-        if isinstance(guild, discord.Guild | discord.PartialInviteGuild)
-        else code
-    )
+    name = guild.name if isinstance(guild, discord.Guild | discord.PartialInviteGuild) else code
     return SponsoredServer(name=name, invite=f"https://discord.gg/{invite.code}")
 
 
@@ -186,10 +199,13 @@ def giveaway_layout(
     count = len(set(row.members)) if entries is None else entries
     when = stamp(datetime.now(UTC) if ended else row.finish)
     duration_label = "Ended" if ended else "Duration"
-    winner_value = winners if winners is not None else str(row.winners)
+    if winners is None:
+        winner_line = f"<:confetti:1551256166074687519>  **Winners:** `{row.winners}`"
+    else:
+        winner_line = f"<:confetti:1551256166074687519>  **Winners:** {winners}"
     header = (
         f"## <:giveaway:1551256171728347279> {row.title}\n"
-        f"<:confetti:1551256166074687519>  **Winners:** `{winner_value}`\n"
+        f"{winner_line}\n"
         f"<:event:1551256173901250580> **{duration_label}:** {when}\n"
         f"<:people:1551256195585540306> **Entries:** `{count:,}`"
     )
@@ -211,34 +227,21 @@ def giveaway_layout(
         ]
     )
     if ended:
-        items.append(
-            ui.ActionRow(
-                ui.Button(
-                    label="Participants",
-                    style=discord.ButtonStyle.secondary,
-                    custom_id="giveaway:participants_ended",
-                )
-            )
-        )
+        items.append(ui.ActionRow(ParticipantsButton(ended=True)))
     else:
-        items.append(
-            ui.ActionRow(
-                ui.Button(
-                    emoji="<:confetti:1551256166074687519>",
-                    style=discord.ButtonStyle.gray,
-                    custom_id="giveaway:join",
-                ),
-                ui.Button(
-                    label="Participants",
-                    style=discord.ButtonStyle.secondary,
-                    custom_id="giveaway:participants",
-                ),
-            )
-        )
+        items.append(ui.ActionRow(JoinButton(), ParticipantsButton()))
     items.append(ui.MediaGallery(discord.MediaGalleryItem(FOOTER)))
     view = AspectLayout(timeout=None)
     view.add_item(ui.Container(*items))
     return view
+
+
+def persistent_giveaway_views() -> tuple[AspectLayout, AspectLayout]:
+    active = AspectLayout(timeout=None)
+    active.add_item(ui.Container(ui.ActionRow(JoinButton(), ParticipantsButton())))
+    ended = AspectLayout(timeout=None)
+    ended.add_item(ui.Container(ui.ActionRow(ParticipantsButton(ended=True))))
+    return active, ended
 
 
 async def respond(interaction: Interaction, text: str) -> None:
@@ -261,8 +264,10 @@ async def ready_client(interaction: Interaction) -> Aspect | None:
 
 
 async def refresh_message(bot: Aspect, message: discord.Message, row: Giveaway) -> None:
-    with contextlib.suppress(discord.HTTPException):
-        await message.edit(view=giveaway_layout(row), embed=None)
+    try:
+        await message.edit(view=giveaway_layout(row))
+    except discord.HTTPException:
+        logger.warning("Could not refresh giveaway message %s", message.id)
 
 
 async def show_participants(interaction: Interaction, *, ended: bool) -> None:
@@ -271,7 +276,8 @@ async def show_participants(interaction: Interaction, *, ended: bool) -> None:
     if client is None or message is None:
         return
     db = database(client)
-    await interaction.response.defer(ephemeral=True)
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
     members: list[int] | None = None
     if ended:
         members = await db.ended_giveaway(message.channel.id, message.id)
@@ -289,6 +295,44 @@ async def show_participants(interaction: Interaction, *, ended: bool) -> None:
     if len(unique) > PARTICIPANT_PAGE:
         body += f"\n…and {len(unique) - PARTICIPANT_PAGE} more"
     await respond(interaction, f"## Participants\n{body}")
+
+
+async def handle_join(interaction: Interaction) -> None:
+    client = await ready_client(interaction)
+    member = interaction.user
+    message = interaction.message
+    if (
+        client is None
+        or interaction.guild is None
+        or message is None
+        or not isinstance(member, discord.Member)
+    ):
+        return
+    db = database(client)
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
+    row = await db.giveaway(interaction.guild.id, message.id)
+    if row is None:
+        await respond(interaction, "This giveaway does not exist or has been removed.")
+        return
+    if reason := entry_block(member, row):
+        await respond(interaction, reason)
+        return
+    if member.id in row.members:
+        await interaction.followup.send(
+            "You are already in this giveaway.",
+            view=LeaveView(client, message, member.id),
+            ephemeral=True,
+        )
+        return
+    members = [*row.members, member.id]
+    await db.set_giveaway_members(message.id, members)
+    await refresh_message(client, message, replace(row, members=members))
+    reminder = server_reminder(row)
+    text = "You joined the giveaway."
+    if reminder is not None:
+        text = f"{text}\n{reminder}"
+    await respond(interaction, text)
 
 
 class LeaveView(ui.View):
@@ -314,83 +358,53 @@ class LeaveView(ui.View):
         await respond(interaction, "You left the giveaway.")
 
 
-class GiveawayView(ui.View):
+class JoinButton(ui.Button[Any]):
     def __init__(self) -> None:
-        super().__init__(timeout=None)
+        super().__init__(
+            emoji=discord.PartialEmoji(name="confetti", id=1551256166074687519),
+            style=discord.ButtonStyle.gray,
+            custom_id="giveaway:join",
+        )
 
-    @ui.button(
-        emoji="<:confetti:1551256166074687519>",
-        style=discord.ButtonStyle.gray,
-        custom_id="giveaway:join",
-    )
-    async def join(self, interaction: Interaction, _button: ui.Button[Any]) -> None:
-        client = await ready_client(interaction)
-        member = interaction.user
-        message = interaction.message
-        if (
-            client is None
-            or interaction.guild is None
-            or message is None
-            or not isinstance(member, discord.Member)
-        ):
-            return
-        db = database(client)
-        await interaction.response.defer(ephemeral=True)
-        row = await db.giveaway(interaction.guild.id, message.id)
-        if row is None:
-            await respond(interaction, "This giveaway does not exist or has been removed.")
-            return
-        if reason := entry_block(member, row):
-            await respond(interaction, reason)
-            return
-        if member.id in row.members:
-            await interaction.followup.send(
-                "You are already in this giveaway.",
-                view=LeaveView(client, message, member.id),
-                ephemeral=True,
-            )
-            return
-        members = [*row.members, member.id]
-        await db.set_giveaway_members(message.id, members)
-        await refresh_message(client, message, replace(row, members=members))
-        reminder = server_reminder(row)
-        text = "You joined the giveaway."
-        if reminder is not None:
-            text = f"{text}\n{reminder}"
-        await respond(interaction, text)
-
-    @ui.button(
-        label="Participants",
-        style=discord.ButtonStyle.secondary,
-        custom_id="giveaway:participants",
-    )
-    async def participants(self, interaction: Interaction, _button: ui.Button[Any]) -> None:
-        await show_participants(interaction, ended=False)
+    async def callback(self, interaction: Interaction) -> None:
+        await handle_join(interaction)
 
 
-class GiveawayEndedView(ui.View):
-    def __init__(self) -> None:
-        super().__init__(timeout=None)
+class ParticipantsButton(ui.Button[Any]):
+    def __init__(self, *, ended: bool = False) -> None:
+        super().__init__(
+            label="Participants",
+            style=discord.ButtonStyle.secondary,
+            custom_id=("giveaway:participants_ended" if ended else "giveaway:participants"),
+        )
+        self._ended = ended
 
-    @ui.button(
-        label="Participants",
-        style=discord.ButtonStyle.secondary,
-        custom_id="giveaway:participants_ended",
-    )
-    async def participants(self, interaction: Interaction, _button: ui.Button[Any]) -> None:
-        await show_participants(interaction, ended=True)
+    async def callback(self, interaction: Interaction) -> None:
+        await show_participants(interaction, ended=self._ended)
 
 
 async def fetch_message(bot: Aspect, row: Giveaway) -> discord.Message | None:
     guild = bot.get_guild(row.guild_id)
     if guild is None:
+        try:
+            guild = await bot.fetch_guild(row.guild_id)
+        except discord.HTTPException:
+            return None
+    try:
+        found = guild.get_channel(row.channel_id) or await bot.fetch_channel(row.channel_id)
+    except discord.HTTPException:
+        logger.warning(
+            "Could not fetch giveaway channel guild=%s channel=%s",
+            row.guild_id,
+            row.channel_id,
+        )
+        return None
+    if not isinstance(found, discord.TextChannel):
         return None
     try:
-        channel = guild.get_channel(row.channel_id) or await guild.fetch_channel(row.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return None
-        return await channel.fetch_message(row.message_id)
+        return await found.fetch_message(row.message_id)
     except discord.HTTPException:
+        logger.warning("Could not fetch giveaway message %s", row.message_id)
         return None
 
 
@@ -402,12 +416,10 @@ async def announce_result(bot: Aspect, row: Giveaway, message: discord.Message) 
     else:
         result = ", ".join(user_mention(user_id) for user_id in winners)
     try:
-        await message.edit(
-            view=giveaway_layout(row, ended=True, winners=result),
-            embed=None,
-        )
+        await message.edit(view=giveaway_layout(row, ended=True, winners=result))
     except discord.HTTPException:
         logger.warning("Could not edit ended giveaway %s", row.message_id)
+        return
     if winners:
         with contextlib.suppress(discord.HTTPException):
             await message.reply(
@@ -420,6 +432,8 @@ async def end_giveaway(bot: Aspect, row: Giveaway) -> None:
     message = await fetch_message(bot, row)
     if message is not None:
         await announce_result(bot, row, message)
+    else:
+        logger.warning("Ending giveaway %s without updating its message", row.message_id)
     await database(bot).store_ended_giveaway(row.channel_id, row.message_id, row.members)
 
 
@@ -428,8 +442,8 @@ class Giveaways(commands.Cog):
         self.bot = bot
 
     async def cog_load(self) -> None:
-        self.bot.add_view(GiveawayView())
-        self.bot.add_view(GiveawayEndedView())
+        for view in persistent_giveaway_views():
+            self.bot.add_view(view)
         self.watch.start()
 
     async def cog_unload(self) -> None:
@@ -511,9 +525,7 @@ class Giveaways(commands.Cog):
                     return
                 updated_servers = merge_servers(current, parsed, mode)
             if len(updated_servers) > requirement.limit:
-                await reply.warn(
-                    f"You can only set up to {requirement.limit} {requirement.label}."
-                )
+                await reply.warn(f"You can only set up to {requirement.limit} {requirement.label}.")
                 return
             await db.set_giveaway_servers(message.id, updated_servers or None)
             row = replace(row, required_servers=updated_servers or None)
@@ -527,9 +539,7 @@ class Giveaways(commands.Cog):
                     return
                 updated_ids = merge_ids(current_ids, parsed_ids, mode)
             if len(updated_ids) > requirement.limit:
-                await reply.warn(
-                    f"You can only set up to {requirement.limit} {requirement.label}."
-                )
+                await reply.warn(f"You can only set up to {requirement.limit} {requirement.label}.")
                 return
             await db.set_giveaway_roles(message.id, "required_roles", updated_ids or None)
             row = replace(row, required_roles=updated_ids or None)
@@ -543,9 +553,7 @@ class Giveaways(commands.Cog):
                     return
                 updated_ids = merge_ids(current_ids, parsed_ids, mode)
             if len(updated_ids) > requirement.limit:
-                await reply.warn(
-                    f"You can only set up to {requirement.limit} {requirement.label}."
-                )
+                await reply.warn(f"You can only set up to {requirement.limit} {requirement.label}.")
                 return
             await db.set_giveaway_roles(message.id, "ignore_roles", updated_ids or None)
             row = replace(row, ignore_roles=updated_ids or None)
@@ -588,8 +596,8 @@ class Giveaways(commands.Cog):
         duration="How long it runs, e.g. 12h or 2d",
         winners="Number of winners (1-20)",
         prize="Prize name",
-        role="Optional required role(s)",
-        ignore="Optional roles blocked from entering",
+        role="Optional required role",
+        ignore="Optional role blocked from entering",
         server="Optional sponsored server invite, e.g. https://discord.gg/aspect",
     )
     @commands.has_permissions(manage_guild=True)
@@ -601,8 +609,8 @@ class Giveaways(commands.Cog):
         winners: commands.Range[int, 1, 20],
         *,
         prize: str,
-        role: str | None = None,
-        ignore: str | None = None,
+        role: discord.Role | None = None,
+        ignore: discord.Role | None = None,
         server: str | None = None,
     ) -> None:
         ctx = require_context(ctx)
@@ -614,16 +622,15 @@ class Giveaways(commands.Cog):
             await ctx.warn(f"You can't host more than **{MAX_ACTIVE}** giveaways at once.")
             return
         title, flags = parse_flags(prize)
-        for key, value in {"role": role, "ignore": ignore, "server": server}.items():
-            if value:
-                flags[key] = value
+        if server:
+            flags["server"] = server
         if len(title) < 2:
             await ctx.warn("That prize is not valid.")
             return
-        required_roles: list[int] | None = None
-        ignore_roles: list[int] | None = None
+        required_roles: list[int] | None = [role.id] if role is not None else None
+        ignore_roles: list[int] | None = [ignore.id] if ignore is not None else None
         required_servers: list[SponsoredServer] | None = None
-        if "role" in flags:
+        if required_roles is None and "role" in flags:
             ids = await self.parse_role_ids(ctx, flags["role"])
             if ids is None:
                 return
@@ -633,7 +640,7 @@ class Giveaways(commands.Cog):
                 )
                 return
             required_roles = ids
-        if "ignore" in flags:
+        if ignore_roles is None and "ignore" in flags:
             ids = await self.parse_role_ids(ctx, flags["ignore"])
             if ids is None:
                 return

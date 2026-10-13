@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -16,6 +17,9 @@ from bot.shared.context import require_context
 from bot.shared.layout import AspectLayout
 
 logger = logging.getLogger("aspect")
+
+_ROBLOX_BACKOFF = 120.0
+_ROBLOX_LOG_EVERY = 300.0
 
 
 def timeframe_choices(now: datetime) -> list[str]:
@@ -129,6 +133,8 @@ class History(AspectLayout):
 class Purchases(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
+        self._roblox_skip_until = 0.0
+        self._roblox_log_at = 0.0
 
     async def cog_load(self) -> None:
         self.watch.start()
@@ -325,6 +331,9 @@ class Purchases(commands.Cog):
         roblox, db = self.bot.roblox, self.bot.db
         if roblox is None or db is None:
             return
+        now = time.monotonic()
+        if now < self._roblox_skip_until:
+            return
         group = self.bot.settings.roblox_group_id
         try:
             if await db.setting(f"purchases:{group}:seeded") is not True:
@@ -404,7 +413,10 @@ class Purchases(commands.Cog):
                 await channel.send(view=view)
                 await db.store_sales(group, [sale])
         except RobloxError as exc:
-            logger.warning("Purchase history is unavailable status=%s", exc.status)
+            self._roblox_skip_until = time.monotonic() + _ROBLOX_BACKOFF
+            if time.monotonic() >= self._roblox_log_at:
+                logger.warning("Purchase history is unavailable status=%s", exc.status)
+                self._roblox_log_at = time.monotonic() + _ROBLOX_LOG_EVERY
         except discord.HTTPException:
             logger.warning("Could not log a purchase")
 
