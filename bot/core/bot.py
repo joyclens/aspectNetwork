@@ -7,6 +7,7 @@ from typing import Any, TypeVar, overload
 
 import aiohttp
 import discord
+import jishaku
 from discord.ext import commands
 
 from bot import __version__
@@ -29,6 +30,10 @@ from bot.shared.http import session
 logger = logging.getLogger("aspect")
 
 ContextT = TypeVar("ContextT", bound=commands.Context[Any])
+
+
+jishaku.flags.RETAIN = True
+jishaku.flags.NO_DM_TRACEBACK = False
 
 
 def _discover(folder: str) -> list[str]:
@@ -111,6 +116,8 @@ class Aspect(commands.Bot):
         await self.roblox.start()
         await asyncio.gather(self._check_roblox(), self._start_dock(), self._start_cookie())
         await self._load_extensions()
+        await self.load_extension("jishaku")
+   
 
     async def on_ready(self) -> None:
         if self._banner_printed or self.user is None:
