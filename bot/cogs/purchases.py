@@ -177,7 +177,7 @@ class Purchases(commands.Cog):
                     "## <:marketplace:1551256187301797970> New Purchase\n"
                     f"[**{sale.agent_name}**]({profile}) has purchased an **item** from our store."
                 ),
-                ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+                ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 ui.TextDisplay(
                     f"**Item:** {linked}\n"
                     f"**Price:** `{sale.amount:,}` after tax\n"
@@ -254,7 +254,7 @@ class Purchases(commands.Cog):
                     "## <:marketplace:1551256187301797970> New Purchase\n"
                     f"[**{sale.agent_name}**]({profile}) has purchased an **item** from our store."
                 ),
-                ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+                ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 ui.TextDisplay(
                     f"**Item:** {linked}\n"
                     f"**Price:** `{sale.amount:,}` after tax\n"
@@ -297,7 +297,7 @@ class Purchases(commands.Cog):
                 ui.TextDisplay(
                     f"## <:marketplace:1551256187301797970> Purchase Stats\nStats for **{choice}**."
                 ),
-                ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+                ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 ui.TextDisplay(
                     f"**Purchases:** `{count:,}`\n**Robux Earned:** `{total:,}` after tax"
                 ),
@@ -393,7 +393,7 @@ class Purchases(commands.Cog):
                             f"[**{sale.agent_name}**]({profile}) has purchased an **item** "
                             "from our store."
                         ),
-                        ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+                        ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                         ui.TextDisplay(
                             f"**Item:** {linked}\n"
                             f"**Price:** `{sale.amount:,}` after tax\n"

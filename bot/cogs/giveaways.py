@@ -214,13 +214,13 @@ def giveaway_layout(
     if reqs is not None:
         items.extend(
             [
-                ui.Separator(visible=False),
+                ui.Separator(visible=True),
                 ui.TextDisplay(reqs),
             ]
         )
     items.extend(
         [
-            ui.Separator(visible=False),
+            ui.Separator(visible=True),
             ui.TextDisplay(
                 "-# <:person:1551256197456330813> Giveaway hosted by " + user_mention(row.host_id)
             ),
