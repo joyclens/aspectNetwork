@@ -18,6 +18,10 @@ from bot.shared.layout import AspectLayout, container_view
 
 logger = logging.getLogger("aspect")
 
+_UNAVAILABLE = (
+    "**Sorry!** We're currently undergoing maintenance, please try again later."
+)
+
 
 def _emoji_id(token: str) -> int | None:
     if not (token.startswith("<") and token.endswith(">") and token.count(":") == 2):
@@ -60,7 +64,7 @@ class VerifyButton(discord.ui.Button[Any]):
                 await interaction.followup.send(
                     view=container_view(
                         discord.ui.TextDisplay(
-                            "**Sorry!** We're currently undergoing maintenance, please try again later."
+                            _UNAVAILABLE
                         )
                     ),
                     ephemeral=True,
@@ -129,7 +133,7 @@ class _Continue(discord.ui.Button[Any]):
                     await interaction.response.send_message(
                         view=container_view(
                             discord.ui.TextDisplay(
-                                "**Sorry!** We're currently undergoing maintenance, please try again later."
+                                _UNAVAILABLE
                             )
                         ),
                         ephemeral=True,
@@ -217,7 +221,7 @@ class Verification(commands.Cog):
             await interaction.followup.send(
                 view=container_view(
                     discord.ui.TextDisplay(
-                        "**Sorry!** We're currently undergoing maintenance, please try again later."
+                        _UNAVAILABLE
                     )
                 ),
                 ephemeral=True,
@@ -229,7 +233,7 @@ class Verification(commands.Cog):
             await interaction.followup.send(
                 view=container_view(
                     discord.ui.TextDisplay(
-                        "**Sorry!** We're currently undergoing maintenance, please try again later."
+                        _UNAVAILABLE
                     )
                 ),
                 ephemeral=True,
@@ -347,7 +351,7 @@ class Verification(commands.Cog):
             )
             notice = container_view(
                 discord.ui.TextDisplay(
-                    "**Sorry!** We're currently undergoing maintenance, please try again later."
+                    _UNAVAILABLE
                 )
             )
             if interaction.response.is_done():

@@ -27,6 +27,7 @@ class _Secrets:
     dock_api_key: Final[str] = "boNoeoHZQVQF.EqY3Pl.v0YH4TCRatvYJfMVYb9YOT5kxOSv"
     dock_pid: Final[str] = "og9OxDwj"
     cookie_api_key: Final[str] = "sk_root_ry0sAApchKMTNw2Z2gitodIHew4MQswSsGSARENyA1IQ2Jk97CyxdaBllK2Mdh7QoWYFSZFyxvgyGIbPWwKnsi7PrQER1DsW8Nx8bSl1Sof0HGoyOksssj1NnXlzEFyR"
+    roblox_api_key: Final[str] = "0YG6mnC9uEGb0TPvzNzv7kczj1NIfbMN8ajrwi9g1nap6D0bZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNkluTnBaeTB5TURJeExUQTNMVEV6VkRFNE9qVXhPalE1V2lJc0luUjVjQ0k2SWtwWFZDSjkuZXlKaGRXUWlPaUpTYjJKc2IzaEpiblJsY201aGJDSXNJbWx6Y3lJNklrTnNiM1ZrUVhWMGFHVnVkR2xqWVhScGIyNVRaWEoyYVdObElpd2lZbUZ6WlVGd2FVdGxlU0k2SWpCWlJ6WnRia001ZFVWSFlqQlVVSFo2VG5wMk4ydGplbW94VGtsbVlrMU9PR0ZxY25kcE9XY3hibUZ3TmtRd1lpSXNJbTkzYm1WeVNXUWlPaUkzTVRrMk5EZ3hOeklpTENKbGVIQWlPakUzT1RFek5ERTJNRFlzSW1saGRDSTZNVGM1TVRNek9EQXdOaXdpYm1KbUlqb3hOemt4TXpNNE1EQTJmUS5COHRuTVNPQzJNM3J6VnJjTEVpblZVTWZodDZVN3pZSk5wS2VITWNMeXQwbjhGUE5GV19QTy04ZUwzekNBTG1HQkJ1X1llQlpVd3Y0cFdoTm8xYU95OTQ0M2hHSF91cnhzOU9oWGE3bWZlQkpkRTJ3dTgxdm9vcE14Y28xMEhjZHFHSlVvTjd6c2xlQWRKdU9Ha09IYVg1T3pyejVUX2dDV25aVHJJWEt4MmdiZTB6cUt3dld5OTJhSktMbGRXSzZOTjFiU0dqRnZ5ajZPX2Ruei1ITE9rNUQxZ1lnQkJWRVB4MFdmelpRS2trVkpqSWdzMVlya3BvNVliQ0FXLTVQejVyamtOUjFKd00tS2FveUt4QzJNWGRlazRPak9NMk5jOXUxX2lYZmxjb24xS2M4djlyTl9yMC0xUTNrOUl1MmJ0djhSOTJjYXJ4UzFYdzNhbzNMYmc"
 
 
 Secrets = _Secrets()
@@ -35,6 +36,7 @@ Secrets = _Secrets()
 class App:
     command_prefix: Final[str] = "!"
     roblox_group_id: Final[int] = 719648172
+    roblox_universe_id: Final[int] = 8848357152
 
 
 class Guild:
@@ -50,10 +52,19 @@ class Channels:
     ticket_logs: Final[int] = 1559883403996823552
     purchase_logs: Final[int] = 1559896562426060860
 
+    package_submissions: Final[int] = 1560013999926411335
+    package_storage: Final[int] = 1560013999926411335
+    package_forum_branding: Final[int] = 1560013923002880000
+    package_forum_liveries: Final[int] = 1560013939763454113
+    package_forum_clothing: Final[int] = 1560013962165362851
+    package_forum_development: Final[int] = 1560013977969238037
+
 
 class Roles:
     verified: Final[int] = 1559883463845478481
     ticket_support: Final[int] = 1559883485466857563
+    packager: Final[int] = 0
+    management: Final[int] = 0
 
 
 class Users:

@@ -15,6 +15,8 @@ class Settings(BaseModel):
     dock_api_key: SecretStr | None = None
     dock_pid: str | None = None
     cookie_api_key: SecretStr | None = None
+    roblox_api_key: SecretStr | None = None
+    roblox_universe_id: int = Field(default=8848357152, gt=0)
 
     @field_validator("command_prefix")
     @classmethod
@@ -39,7 +41,7 @@ class Settings(BaseModel):
             raise ValueError("invalid postgres dsn")
         return SecretStr(raw)
 
-    @field_validator("dock_api_key", "cookie_api_key", mode="before")
+    @field_validator("dock_api_key", "cookie_api_key", "roblox_api_key", mode="before")
     @classmethod
     def optional_key_ok(cls, value: object) -> SecretStr | None:
         if value is None:
@@ -75,4 +77,6 @@ def load_settings() -> Settings:
         dock_api_key=Secrets.dock_api_key,
         dock_pid=Secrets.dock_pid,
         cookie_api_key=Secrets.cookie_api_key,
+        roblox_api_key=Secrets.roblox_api_key or None,
+        roblox_universe_id=App.roblox_universe_id,
     )

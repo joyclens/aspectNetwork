@@ -16,10 +16,10 @@ class Utility(commands.Cog):
 
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
-    @commands.hybrid_command(
+    @commands.hybrid_command(  # type: ignore[arg-type]
         name="say",
         description="Send a message as the bot",
-        )  # type: ignore[arg-type]
+    )
     @app_commands.describe(message="Text to send in this channel")
     async def say(self, ctx: commands.Context[Any], *, message: str) -> None:
         """Send a message as the bot."""

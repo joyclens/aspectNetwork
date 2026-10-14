@@ -251,7 +251,7 @@ class EscalateButton(ui.Button[Any]):
         )
 
 
-def ticket_actions(*, claimed: bool = False) -> ui.ActionRow:
+def ticket_actions(*, claimed: bool = False) -> ui.ActionRow[Any]:
     claim = UnclaimButton() if claimed else ClaimButton()
     return ui.ActionRow(claim, CloseButton(), EscalateButton())
 
@@ -1154,6 +1154,8 @@ class Tickets(commands.Cog):
         items: list[ui.Item[Any]] = [ui.TextDisplay(text)]
         if url is not None:
             items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
+        if not isinstance(user, discord.abc.Messageable):
+            return
         try:
             await user.send(view=container_view(*items))
         except discord.HTTPException:

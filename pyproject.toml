@@ -11,6 +11,7 @@ dependencies = [
     "pydantic-settings>=2.4",
     "python-dotenv>=1.0",
     "jishaku>=2.5,<3",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +39,9 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
+[tool.ruff.lint.per-file-ignores]
+"bot/core/ids.py" = ["E501"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["bot"]
 
@@ -49,7 +53,7 @@ warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["asyncpg", "asyncpg.*", "jishaku", "jishaku.*"]
+module = ["asyncpg", "asyncpg.*", "jishaku", "jishaku.*", "PIL", "PIL.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

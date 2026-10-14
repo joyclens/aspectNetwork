@@ -84,3 +84,75 @@ CREATE TABLE IF NOT EXISTS giveaways_ended (
     channel_id BIGINT NOT NULL,
     members JSONB NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS packages (
+    id BIGSERIAL PRIMARY KEY,
+    packager_id BIGINT NOT NULL,
+    package_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    price BIGINT NOT NULL,
+    description TEXT NOT NULL,
+    sell_type TEXT NOT NULL,
+    customizable BOOLEAN NOT NULL,
+    storage_channel_id BIGINT,
+    storage_message_id BIGINT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewer_id BIGINT,
+    gamepass_id BIGINT,
+    forum_channel_id BIGINT,
+    forum_thread_id BIGINT,
+    forum_message_id BIGINT,
+    submission_channel_id BIGINT,
+    submission_message_id BIGINT,
+    showcase_filename TEXT NOT NULL DEFAULT '',
+    sold_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS packages_status_idx ON packages (status);
+CREATE INDEX IF NOT EXISTS packages_packager_idx ON packages (packager_id);
+
+CREATE TABLE IF NOT EXISTS package_purchases (
+    id BIGSERIAL PRIMARY KEY,
+    package_id BIGINT NOT NULL REFERENCES packages (id),
+    buyer_id BIGINT NOT NULL,
+    buyer_roblox_id BIGINT NOT NULL,
+    recipient_id BIGINT,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    expires_at TIMESTAMPTZ NOT NULL,
+    paid_at TIMESTAMPTZ,
+    delivered_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS package_purchases_status_expires_idx
+    ON package_purchases (status, expires_at);
+
+CREATE TABLE IF NOT EXISTS package_payouts (
+    id BIGSERIAL PRIMARY KEY,
+    purchase_id BIGINT NOT NULL UNIQUE REFERENCES package_purchases (id),
+    packager_id BIGINT NOT NULL,
+    gross BIGINT NOT NULL,
+    packager_amount BIGINT NOT NULL,
+    network_amount BIGINT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    settled_by BIGINT,
+    settled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS package_payouts_packager_status_idx
+    ON package_payouts (packager_id, status);
+
+CREATE TABLE IF NOT EXISTS package_reports (
+    id BIGSERIAL PRIMARY KEY,
+    package_id BIGINT NOT NULL REFERENCES packages (id),
+    reporter_id BIGINT NOT NULL,
+    issue TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS package_reports_cooldown_idx
+    ON package_reports (package_id, reporter_id, created_at DESC);

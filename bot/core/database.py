@@ -45,6 +45,69 @@ class Giveaway:
     required_servers: list[SponsoredServer] | None
 
 
+@dataclass(frozen=True, slots=True)
+class Package:
+    id: int
+    packager_id: int
+    package_type: str
+    title: str
+    price: int
+    description: str
+    sell_type: str
+    customizable: bool
+    storage_channel_id: int | None
+    storage_message_id: int | None
+    status: str
+    reviewer_id: int | None
+    gamepass_id: int | None
+    forum_channel_id: int | None
+    forum_thread_id: int | None
+    forum_message_id: int | None
+    submission_channel_id: int | None
+    submission_message_id: int | None
+    showcase_filename: str
+    sold_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PackagePurchase:
+    id: int
+    package_id: int
+    buyer_id: int
+    buyer_roblox_id: int
+    recipient_id: int | None
+    kind: str
+    status: str
+    expires_at: datetime
+    paid_at: datetime | None
+    delivered_at: datetime | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PackagePayout:
+    id: int
+    purchase_id: int
+    packager_id: int
+    gross: int
+    packager_amount: int
+    network_amount: int
+    status: str
+    settled_by: int | None
+    settled_at: datetime | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PackagerPayoutSummary:
+    packager_id: int
+    pending_total: int
+    paid_total: int
+    pending_count: int
+
+
 def _ids(value: Any) -> list[int] | None:
     if value is None:
         return None
@@ -113,6 +176,82 @@ def _giveaway(row: Any) -> Giveaway:
         required_roles=_ids(row["required_roles"]),
         ignore_roles=_ids(row["ignore_roles"]),
         required_servers=_servers(row["required_servers"]),
+    )
+
+
+def _package(row: Any) -> Package:
+    return Package(
+        id=int(row["id"]),
+        packager_id=int(row["packager_id"]),
+        package_type=str(row["package_type"]),
+        title=str(row["title"]),
+        price=int(row["price"]),
+        description=str(row["description"]),
+        sell_type=str(row["sell_type"]),
+        customizable=bool(row["customizable"]),
+        storage_channel_id=(
+            int(row["storage_channel_id"]) if row["storage_channel_id"] is not None else None
+        ),
+        storage_message_id=(
+            int(row["storage_message_id"]) if row["storage_message_id"] is not None else None
+        ),
+        status=str(row["status"]),
+        reviewer_id=int(row["reviewer_id"]) if row["reviewer_id"] is not None else None,
+        gamepass_id=int(row["gamepass_id"]) if row["gamepass_id"] is not None else None,
+        forum_channel_id=(
+            int(row["forum_channel_id"]) if row["forum_channel_id"] is not None else None
+        ),
+        forum_thread_id=(
+            int(row["forum_thread_id"]) if row["forum_thread_id"] is not None else None
+        ),
+        forum_message_id=(
+            int(row["forum_message_id"]) if row["forum_message_id"] is not None else None
+        ),
+        submission_channel_id=(
+            int(row["submission_channel_id"])
+            if row["submission_channel_id"] is not None
+            else None
+        ),
+        submission_message_id=(
+            int(row["submission_message_id"])
+            if row["submission_message_id"] is not None
+            else None
+        ),
+        showcase_filename=str(row["showcase_filename"] or ""),
+        sold_at=row["sold_at"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _purchase(row: Any) -> PackagePurchase:
+    return PackagePurchase(
+        id=int(row["id"]),
+        package_id=int(row["package_id"]),
+        buyer_id=int(row["buyer_id"]),
+        buyer_roblox_id=int(row["buyer_roblox_id"]),
+        recipient_id=int(row["recipient_id"]) if row["recipient_id"] is not None else None,
+        kind=str(row["kind"]),
+        status=str(row["status"]),
+        expires_at=row["expires_at"],
+        paid_at=row["paid_at"],
+        delivered_at=row["delivered_at"],
+        created_at=row["created_at"],
+    )
+
+
+def _payout(row: Any) -> PackagePayout:
+    return PackagePayout(
+        id=int(row["id"]),
+        purchase_id=int(row["purchase_id"]),
+        packager_id=int(row["packager_id"]),
+        gross=int(row["gross"]),
+        packager_amount=int(row["packager_amount"]),
+        network_amount=int(row["network_amount"]),
+        status=str(row["status"]),
+        settled_by=int(row["settled_by"]) if row["settled_by"] is not None else None,
+        settled_at=row["settled_at"],
+        created_at=row["created_at"],
     )
 
 
@@ -508,6 +647,338 @@ class Database:
             json.dumps(members),
         )
         await self.delete_giveaway(message_id)
+
+    async def package(self, package_id: int) -> Package | None:
+        row = await self._pool.fetchrow("SELECT * FROM packages WHERE id = $1", package_id)
+        return _package(row) if row else None
+
+    async def create_package(
+        self,
+        *,
+        packager_id: int,
+        package_type: str,
+        title: str,
+        price: int,
+        description: str,
+        sell_type: str,
+        customizable: bool,
+        storage_channel_id: int,
+        storage_message_id: int,
+        submission_channel_id: int,
+        submission_message_id: int,
+        showcase_filename: str,
+    ) -> Package:
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO packages (
+                packager_id, package_type, title, price, description, sell_type,
+                customizable, storage_channel_id, storage_message_id,
+                submission_channel_id, submission_message_id, showcase_filename, status
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9,
+                $10, $11, $12, 'pending'
+            )
+            RETURNING *
+            """,
+            packager_id,
+            package_type,
+            title,
+            price,
+            description,
+            sell_type,
+            customizable,
+            storage_channel_id,
+            storage_message_id,
+            submission_channel_id,
+            submission_message_id,
+            showcase_filename,
+        )
+        return _package(row)
+
+    async def set_package_submission(self, package_id: int, message_id: int) -> None:
+        await self._pool.execute(
+            """
+            UPDATE packages
+            SET submission_message_id = $2, updated_at = NOW()
+            WHERE id = $1
+            """,
+            package_id,
+            message_id,
+        )
+
+    async def claim_package(self, package_id: int, reviewer_id: int) -> Package | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE packages
+            SET status = 'processing', reviewer_id = $2, updated_at = NOW()
+            WHERE id = $1 AND status = 'pending'
+            RETURNING *
+            """,
+            package_id,
+            reviewer_id,
+        )
+        return _package(row) if row else None
+
+    async def revert_package_pending(self, package_id: int) -> None:
+        await self._pool.execute(
+            """
+            UPDATE packages
+            SET status = 'pending', reviewer_id = NULL, updated_at = NOW()
+            WHERE id = $1 AND status = 'processing'
+            """,
+            package_id,
+        )
+
+    async def accept_package(
+        self,
+        package_id: int,
+        *,
+        gamepass_id: int,
+        forum_channel_id: int,
+        forum_thread_id: int,
+        forum_message_id: int,
+    ) -> Package | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE packages
+            SET status = 'accepted',
+                gamepass_id = $2,
+                forum_channel_id = $3,
+                forum_thread_id = $4,
+                forum_message_id = $5,
+                updated_at = NOW()
+            WHERE id = $1 AND status = 'processing'
+            RETURNING *
+            """,
+            package_id,
+            gamepass_id,
+            forum_channel_id,
+            forum_thread_id,
+            forum_message_id,
+        )
+        return _package(row) if row else None
+
+    async def deny_package(self, package_id: int, reviewer_id: int) -> Package | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE packages
+            SET status = 'denied', reviewer_id = $2, updated_at = NOW()
+            WHERE id = $1 AND status IN ('pending', 'processing')
+            RETURNING *
+            """,
+            package_id,
+            reviewer_id,
+        )
+        return _package(row) if row else None
+
+    async def mark_package_sold(self, package_id: int) -> Package | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE packages
+            SET status = 'sold', sold_at = NOW(), updated_at = NOW()
+            WHERE id = $1 AND status = 'accepted'
+            RETURNING *
+            """,
+            package_id,
+        )
+        return _package(row) if row else None
+
+    async def create_purchase(
+        self,
+        *,
+        package_id: int,
+        buyer_id: int,
+        buyer_roblox_id: int,
+        recipient_id: int | None,
+        kind: str,
+        expires_at: datetime,
+    ) -> PackagePurchase:
+        row = await self._pool.fetchrow(
+            """
+            INSERT INTO package_purchases (
+                package_id, buyer_id, buyer_roblox_id, recipient_id, kind, status, expires_at
+            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6)
+            RETURNING *
+            """,
+            package_id,
+            buyer_id,
+            buyer_roblox_id,
+            recipient_id,
+            kind,
+            expires_at,
+        )
+        return _purchase(row)
+
+    async def purchase(self, purchase_id: int) -> PackagePurchase | None:
+        row = await self._pool.fetchrow(
+            "SELECT * FROM package_purchases WHERE id = $1",
+            purchase_id,
+        )
+        return _purchase(row) if row else None
+
+    async def pending_purchases(self, now: datetime) -> list[PackagePurchase]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM package_purchases
+            WHERE status = 'pending' AND expires_at > $1
+            ORDER BY expires_at ASC
+            """,
+            now,
+        )
+        return [_purchase(row) for row in rows]
+
+    async def expire_purchases(self, now: datetime) -> int:
+        result = await self._pool.execute(
+            """
+            UPDATE package_purchases
+            SET status = 'expired'
+            WHERE status = 'pending' AND expires_at <= $1
+            """,
+            now,
+        )
+        return int(str(result).rsplit(" ", maxsplit=1)[-1] or 0)
+
+    async def mark_purchase_paid(
+        self,
+        purchase_id: int,
+        *,
+        packager_id: int,
+        gross: int,
+        packager_amount: int,
+        network_amount: int,
+    ) -> PackagePurchase | None:
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    UPDATE package_purchases
+                    SET status = 'paid', paid_at = NOW()
+                    WHERE id = $1 AND status = 'pending'
+                    RETURNING *
+                    """,
+                    purchase_id,
+                )
+                if row is None:
+                    return None
+                await connection.execute(
+                    """
+                    INSERT INTO package_payouts (
+                        purchase_id, packager_id, gross, packager_amount, network_amount, status
+                    ) VALUES ($1, $2, $3, $4, $5, 'pending')
+                    ON CONFLICT (purchase_id) DO NOTHING
+                    """,
+                    purchase_id,
+                    packager_id,
+                    gross,
+                    packager_amount,
+                    network_amount,
+                )
+                return _purchase(row)
+
+    async def mark_purchase_undelivered(self, purchase_id: int) -> None:
+        await self._pool.execute(
+            """
+            UPDATE package_purchases
+            SET status = 'undelivered'
+            WHERE id = $1 AND status = 'paid'
+            """,
+            purchase_id,
+        )
+
+    async def mark_purchase_delivered(self, purchase_id: int) -> None:
+        await self._pool.execute(
+            """
+            UPDATE package_purchases
+            SET status = 'paid', delivered_at = NOW()
+            WHERE id = $1 AND status IN ('paid', 'undelivered')
+            """,
+            purchase_id,
+        )
+
+    async def buyer_owns_package(self, package_id: int, buyer_id: int) -> bool:
+        value = await self._pool.fetchval(
+            """
+            SELECT 1 FROM package_purchases
+            WHERE package_id = $1 AND buyer_id = $2
+              AND status IN ('pending', 'paid', 'undelivered')
+            LIMIT 1
+            """,
+            package_id,
+            buyer_id,
+        )
+        return value is not None
+
+    async def payout_summary(self) -> list[PackagerPayoutSummary]:
+        rows = await self._pool.fetch(
+            """
+            SELECT packager_id,
+                   COALESCE(SUM(packager_amount) FILTER (WHERE status = 'pending'), 0)::bigint
+                     AS pending_total,
+                   COALESCE(SUM(packager_amount) FILTER (WHERE status = 'paid'), 0)::bigint
+                     AS paid_total,
+                   COUNT(*) FILTER (WHERE status = 'pending')::bigint AS pending_count
+            FROM package_payouts
+            GROUP BY packager_id
+            ORDER BY pending_total DESC
+            """
+        )
+        return [
+            PackagerPayoutSummary(
+                packager_id=int(row["packager_id"]),
+                pending_total=int(row["pending_total"]),
+                paid_total=int(row["paid_total"]),
+                pending_count=int(row["pending_count"]),
+            )
+            for row in rows
+        ]
+
+    async def payouts_for(self, packager_id: int) -> list[PackagePayout]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM package_payouts
+            WHERE packager_id = $1
+            ORDER BY created_at DESC
+            """,
+            packager_id,
+        )
+        return [_payout(row) for row in rows]
+
+    async def settle_payouts(self, packager_id: int, settled_by: int) -> int:
+        result = await self._pool.execute(
+            """
+            UPDATE package_payouts
+            SET status = 'paid', settled_by = $2, settled_at = NOW()
+            WHERE packager_id = $1 AND status = 'pending'
+            """,
+            packager_id,
+            settled_by,
+        )
+        return int(str(result).rsplit(" ", maxsplit=1)[-1] or 0)
+
+    async def recent_report(self, package_id: int, reporter_id: int, since: datetime) -> bool:
+        value = await self._pool.fetchval(
+            """
+            SELECT 1 FROM package_reports
+            WHERE package_id = $1 AND reporter_id = $2 AND created_at >= $3
+            LIMIT 1
+            """,
+            package_id,
+            reporter_id,
+            since,
+        )
+        return value is not None
+
+    async def add_report(self, package_id: int, reporter_id: int, issue: str) -> None:
+        await self._pool.execute(
+            """
+            INSERT INTO package_reports (package_id, reporter_id, issue)
+            VALUES ($1, $2, $3)
+            """,
+            package_id,
+            reporter_id,
+            issue,
+        )
 
 
 async def connect(dsn: str) -> tuple[Database, str]:

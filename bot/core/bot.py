@@ -37,11 +37,19 @@ os.environ.setdefault("JISHAKU_RETAIN", "1")
 
 def _discover(folder: str) -> list[str]:
     root = Path(__file__).resolve().parents[1] / folder
-    return [
+    modules = [
         f"bot.{folder}.{path.stem}"
         for path in sorted(root.glob("*.py"))
         if path.name != "__init__.py" and not path.name.startswith("_")
     ]
+    for path in sorted(root.iterdir()):
+        if (
+            path.is_dir()
+            and not path.name.startswith("_")
+            and (path / "__init__.py").is_file()
+        ):
+            modules.append(f"bot.{folder}.{path.name}")
+    return modules
 
 
 class Aspect(commands.Bot):

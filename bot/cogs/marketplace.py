@@ -18,8 +18,7 @@ MARKETPLACE_BANNER = (
     "1553891840795742268/marketplace.png"
 )
 FOOTER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/"
-    "1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
+    "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
 )
 
 _SMALL = discord.SeparatorSpacing.small
