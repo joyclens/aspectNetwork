@@ -43,7 +43,15 @@ class Confirmation(AspectLayout):
         self.add_item(discord.ui.Container(discord.ui.TextDisplay(text), row))
 
     async def interaction_check(self, interaction: discord.Interaction[Any]) -> bool:
-        return interaction.user.id == self.author_id
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            view=container_view(
+                discord.ui.TextDisplay("Only the person who opened this prompt can use it.")
+            ),
+            ephemeral=True,
+        )
+        return False
 
 
 class Context(commands.Context["Aspect"]):

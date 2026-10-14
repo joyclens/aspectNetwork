@@ -13,7 +13,7 @@ from bot.core.database import Ticket
 from bot.core.ids import Channels, Emojis, Roles, Secrets, partial_emoji
 from bot.services.cookie import CookieError
 from bot.shared.checks import database
-from bot.shared.context import require_context
+from bot.shared.context import Confirmation, PromptDeclined, require_context
 from bot.shared.errors import DatabaseUnavailable, report_interaction
 from bot.shared.layout import AspectLayout, container_view
 
@@ -178,8 +178,66 @@ def packages_view() -> ui.LayoutView:
     return view
 
 
-def ticket_message(number: int, owner: discord.Member, reason: str) -> ui.LayoutView:
-    view = ui.LayoutView()
+class ClaimButton(ui.Button[Any]):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Claim",
+            style=discord.ButtonStyle.secondary,
+            custom_id="support:claim",
+        )
+
+    async def callback(self, interaction: discord.Interaction[Any]) -> None:
+        cog = tickets_cog(interaction)
+        if cog is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Tickets are unavailable.")),
+                ephemeral=True,
+            )
+            return
+        await cog.claim_button(interaction)
+
+
+class CloseButton(ui.Button[Any]):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Close",
+            style=discord.ButtonStyle.danger,
+            custom_id="closeSupport:button",
+        )
+
+    async def callback(self, interaction: discord.Interaction[Any]) -> None:
+        cog = tickets_cog(interaction)
+        if cog is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Tickets are unavailable.")),
+                ephemeral=True,
+            )
+            return
+        await cog.close_button(interaction)
+
+
+class EscalateButton(ui.Button[Any]):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Escalate",
+            style=discord.ButtonStyle.secondary,
+            custom_id="support:escalate",
+            disabled=True,
+        )
+
+    async def callback(self, interaction: discord.Interaction[Any]) -> None:
+        await interaction.response.send_message(
+            view=container_view(ui.TextDisplay("Escalation is not available yet.")),
+            ephemeral=True,
+        )
+
+
+def ticket_actions() -> ui.ActionRow:
+    return ui.ActionRow(ClaimButton(), CloseButton(), EscalateButton())
+
+
+def ticket_message(number: int, owner: discord.Member, reason: str) -> AspectLayout:
+    view = AspectLayout(timeout=None)
     view.add_item(
         ui.Container(
             ui.MediaGallery(discord.MediaGalleryItem(SUPPORT_BANNER)),
@@ -191,29 +249,18 @@ def ticket_message(number: int, owner: discord.Member, reason: str) -> ui.Layout
                 f"# Inquiry:\n{reason}"
             ),
             ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
-            ui.ActionRow(
-                ui.Button(
-                    label="Claim",
-                    style=discord.ButtonStyle.secondary,
-                    custom_id="support:claim",
-                ),
-                ui.Button(
-                    label="Close",
-                    style=discord.ButtonStyle.danger,
-                    custom_id="closeSupport:button",
-                ),
-                ui.Button(
-                    label="Escalate",
-                    style=discord.ButtonStyle.secondary,
-                    custom_id="support:escalate",
-                    disabled=True,
-                ),
-            ),
+            ticket_actions(),
             ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
             ui.MediaGallery(discord.MediaGalleryItem(TICKET_FOOTER)),
         )
     )
     return view
+
+
+def register_ticket_views(bot: Aspect) -> None:
+    panel = AspectLayout(timeout=None)
+    panel.add_item(ui.Container(ticket_actions()))
+    bot.add_view(panel)
 
 
 class GetHelp(ui.Button[Any]):
@@ -337,57 +384,6 @@ class SupportModal(ui.Modal, title="General Support - Reason"):
         await cog.open_ticket(interaction, kind=kind, reason=reason)
 
 
-class TicketButtons(ui.View):
-    def __init__(self) -> None:
-        super().__init__(timeout=None)
-
-    @ui.button(label="Claim", style=discord.ButtonStyle.secondary, custom_id="support:claim")
-    async def claim(
-        self,
-        interaction: discord.Interaction[Any],
-        _button: ui.Button[Any],
-    ) -> None:
-        cog = tickets_cog(interaction)
-        if cog is None:
-            await interaction.response.send_message(
-                view=container_view(ui.TextDisplay("Tickets are unavailable.")),
-                ephemeral=True,
-            )
-            return
-        await cog.claim_button(interaction)
-
-    @ui.button(label="Close", style=discord.ButtonStyle.danger, custom_id="closeSupport:button")
-    async def close(
-        self,
-        interaction: discord.Interaction[Any],
-        _button: ui.Button[Any],
-    ) -> None:
-        cog = tickets_cog(interaction)
-        if cog is None:
-            await interaction.response.send_message(
-                view=container_view(ui.TextDisplay("Tickets are unavailable.")),
-                ephemeral=True,
-            )
-            return
-        await cog.close_button(interaction)
-
-    @ui.button(
-        label="Escalate",
-        style=discord.ButtonStyle.secondary,
-        custom_id="support:escalate",
-        disabled=True,
-    )
-    async def escalate(
-        self,
-        interaction: discord.Interaction[Any],
-        _button: ui.Button[Any],
-    ) -> None:
-        await interaction.response.send_message(
-            view=container_view(ui.TextDisplay("Escalation is not available yet.")),
-            ephemeral=True,
-        )
-
-
 class CloseRequest(AspectLayout):
     def __init__(self, owner_id: int, staff_id: int, reason: str) -> None:
         super().__init__(timeout=300)
@@ -450,7 +446,7 @@ class Tickets(commands.Cog):
 
     async def cog_load(self) -> None:
         self.bot.add_view(Dashboard())
-        self.bot.add_view(TicketButtons())
+        register_ticket_views(self.bot)
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -636,6 +632,10 @@ class Tickets(commands.Cog):
             return
         if await self.require_ticket(ctx) is None:
             return
+        try:
+            await ctx.prompt("Are you sure you want to close this ticket?")
+        except PromptDeclined:
+            return
         await ctx.approve("Closing this ticket...")
         await self.close_ticket(ctx, closed_by=ctx.author.id)
 
@@ -753,6 +753,10 @@ class Tickets(commands.Cog):
 
     async def claim_button(self, interaction: discord.Interaction[Any]) -> None:
         if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("You cannot manage tickets.")),
+                ephemeral=True,
+            )
             return
         try:
             database(self.bot)
@@ -806,11 +810,26 @@ class Tickets(commands.Cog):
                 ephemeral=True,
             )
             return
-        await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send(
-            view=container_view(ui.TextDisplay("Closing this ticket...")),
-            ephemeral=True,
+        prompt = Confirmation(
+            interaction.user.id,
+            "Are you sure you want to close this ticket?",
         )
+        await interaction.response.send_message(view=prompt, ephemeral=True)
+        await prompt.wait()
+        if prompt.status is not True:
+            try:
+                await interaction.edit_original_response(
+                    view=container_view(ui.TextDisplay("Close cancelled.")),
+                )
+            except discord.HTTPException:
+                return
+            return
+        try:
+            await interaction.edit_original_response(
+                view=container_view(ui.TextDisplay("Closing this ticket...")),
+            )
+        except discord.HTTPException:
+            pass
         await self.close_ticket(interaction, closed_by=interaction.user.id)
 
     async def claim_ticket(
