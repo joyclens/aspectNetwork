@@ -8,7 +8,8 @@ from discord import ui
 from bot.cogs.packages.constants import PACKAGE_BANNER_URL, SELL_LABELS
 from bot.cogs.packages.media import is_image
 from bot.cogs.packages.models import neutralise_fences
-from bot.core.database import Package
+from bot.core.database import Package, PackagerPackageEarnings
+from bot.core.ids import Guild
 from bot.shared.layout import AspectLayout
 
 MediaRef = tuple[str, str | None]
@@ -150,5 +151,84 @@ def draft_layout(
         items.append(ui.Separator())
         items.append(ui.ActionRow(*buttons))
     view = AspectLayout(timeout=900)
+    view.add_item(ui.Container(*items))
+    return view
+
+
+def delivery_layout(files: list[discord.File]) -> AspectLayout:
+    items: list[ui.Item[Any]] = [
+        ui.TextDisplay(
+            "## Thanks for purchasing!\n"
+            "On behalf of **Aspect Network**, we appreciate your custom. "
+            "The packager has been notified of your purchase, your files are attached below."
+        ),
+        ui.Separator(visible=False),
+    ]
+    for uploaded in files[:10]:
+        items.append(ui.File(uploaded.uri))
+    items.append(_banner())
+    view = AspectLayout(timeout=None)
+    view.add_item(ui.Container(*items))
+    return view
+
+
+def _package_jump(row: PackagerPackageEarnings) -> str:
+    title = row.title.replace("`", "'")
+    if row.forum_thread_id is None:
+        return f"**{title}**"
+    if row.forum_message_id is not None:
+        url = (
+            f"https://discord.com/channels/{Guild.id}/"
+            f"{row.forum_thread_id}/{row.forum_message_id}"
+        )
+    else:
+        url = f"https://discord.com/channels/{Guild.id}/{row.forum_thread_id}"
+    return f"[**{title}**]({url})"
+
+
+def payouts_layout(
+    packager_id: int,
+    rows: list[PackagerPackageEarnings],
+    *,
+    pending_only: bool = False,
+) -> AspectLayout:
+    pending_total = sum(row.pending_total for row in rows)
+    header = (
+        "## Pending Payouts\n"
+        f"<@{packager_id}> has a total of **{pending_total:,}** R$ pending."
+        if pending_only
+        else (
+            "## Package Earnings\n"
+            f"<@{packager_id}> — pending **{pending_total:,}** R$ · "
+            f"paid **{sum(row.paid_total for row in rows):,}** R$ · "
+            f"**{sum(row.sales for row in rows)}** sale(s)."
+        )
+    )
+    items: list[ui.Item[Any]] = [
+        ui.TextDisplay(header),
+        ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+    ]
+    lines: list[str] = []
+    visible = [row for row in rows if not pending_only or row.pending_total > 0]
+    if not visible:
+        lines.append("-# No packages to show.")
+    else:
+        for index, row in enumerate(visible[:25], start=1):
+            if pending_only:
+                lines.append(
+                    f"`{index}.` {_package_jump(row)} — "
+                    f"**{row.pending_total:,}** R$ pending "
+                    f"(`{row.pending_sales}` sale(s))."
+                )
+            else:
+                lines.append(
+                    f"`{index}.` {_package_jump(row)} — "
+                    f"**{row.earned:,}** R$ earned · `{row.sales}` sale(s) · "
+                    f"**{row.pending_total:,}** pending."
+                )
+    items.append(ui.TextDisplay("\n".join(lines)))
+    items.append(ui.Separator(visible=False))
+    items.append(_banner())
+    view = AspectLayout(timeout=None)
     view.add_item(ui.Container(*items))
     return view

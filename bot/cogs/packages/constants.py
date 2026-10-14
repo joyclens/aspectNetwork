@@ -8,7 +8,6 @@ DRAFT_TTL_SECONDS = 15 * 60
 PURCHASE_TTL_SECONDS = 30 * 60
 REPORT_COOLDOWN_SECONDS = 10 * 60
 POLL_INTERVAL_SECONDS = 30
-CONFIRM_COOLDOWN_SECONDS = 10
 
 PACKAGE_BANNER_URL = (
     "https://cdn.discordapp.com/attachments/1553889994538750133/"
@@ -45,7 +44,6 @@ APPROVE_TEMPLATE = r"package:approve:(?P<id>\d+)"
 DENY_TEMPLATE = r"package:deny:(?P<id>\d+)"
 PURCHASE_TEMPLATE = r"package:purchase:(?P<id>\d+)"
 REPORT_TEMPLATE = r"package:report:(?P<id>\d+)"
-CONFIRM_TEMPLATE = r"package:confirm:(?P<id>\d+)"
 RESEND_TEMPLATE = r"package:resend:(?P<id>\d+)"
 
 IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"})

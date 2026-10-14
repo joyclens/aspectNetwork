@@ -108,6 +108,19 @@ class PackagerPayoutSummary:
     pending_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class PackagerPackageEarnings:
+    package_id: int
+    title: str
+    forum_thread_id: int | None
+    forum_message_id: int | None
+    sales: int
+    earned: int
+    pending_sales: int
+    pending_total: int
+    paid_total: int
+
+
 def _ids(value: Any) -> list[int] | None:
     if value is None:
         return None
@@ -965,6 +978,53 @@ class Database:
             packager_id,
         )
         return [_payout(row) for row in rows]
+
+    async def packager_earnings_by_package(
+        self,
+        packager_id: int,
+    ) -> list[PackagerPackageEarnings]:
+        rows = await self._pool.fetch(
+            """
+            SELECT pkg.id AS package_id,
+                   pkg.title,
+                   pkg.forum_thread_id,
+                   pkg.forum_message_id,
+                   COUNT(*)::bigint AS sales,
+                   COALESCE(SUM(pp.packager_amount), 0)::bigint AS earned,
+                   COUNT(*) FILTER (WHERE pp.status = 'pending')::bigint AS pending_sales,
+                   COALESCE(
+                     SUM(pp.packager_amount) FILTER (WHERE pp.status = 'pending'), 0
+                   )::bigint AS pending_total,
+                   COALESCE(
+                     SUM(pp.packager_amount) FILTER (WHERE pp.status = 'paid'), 0
+                   )::bigint AS paid_total
+            FROM package_payouts pp
+            JOIN package_purchases pu ON pu.id = pp.purchase_id
+            JOIN packages pkg ON pkg.id = pu.package_id
+            WHERE pp.packager_id = $1
+            GROUP BY pkg.id, pkg.title, pkg.forum_thread_id, pkg.forum_message_id
+            ORDER BY pending_total DESC, earned DESC, pkg.title ASC
+            """,
+            packager_id,
+        )
+        return [
+            PackagerPackageEarnings(
+                package_id=int(row["package_id"]),
+                title=str(row["title"]),
+                forum_thread_id=(
+                    int(row["forum_thread_id"]) if row["forum_thread_id"] is not None else None
+                ),
+                forum_message_id=(
+                    int(row["forum_message_id"]) if row["forum_message_id"] is not None else None
+                ),
+                sales=int(row["sales"]),
+                earned=int(row["earned"]),
+                pending_sales=int(row["pending_sales"]),
+                pending_total=int(row["pending_total"]),
+                paid_total=int(row["paid_total"]),
+            )
+            for row in rows
+        ]
 
     async def settle_payouts(self, packager_id: int, settled_by: int) -> int:
         result = await self._pool.execute(

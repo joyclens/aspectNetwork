@@ -68,11 +68,23 @@ def discord_files_and_media(
 def media_from_attachments(
     attachments: list[discord.Attachment] | tuple[discord.Attachment, ...],
 ) -> list[tuple[str, str | None]]:
-    return [
-        (item.url, item.content_type)
-        for item in attachments
-        if item.url.startswith(("http://", "https://"))
-    ]
+    return [(f"attachment://{item.filename}", item.content_type) for item in attachments]
+
+
+async def files_and_media_from_attachments(
+    attachments: list[discord.Attachment] | tuple[discord.Attachment, ...],
+    *,
+    limit: int = MAX_MESSAGE_ATTACHMENTS,
+) -> tuple[list[discord.File], list[tuple[str, str | None]]]:
+    files: list[discord.File] = []
+    media: list[tuple[str, str | None]] = []
+    for item in attachments:
+        if len(files) >= limit:
+            break
+        uploaded = discord.File(io.BytesIO(await item.read()), filename=item.filename)
+        files.append(uploaded)
+        media.append((uploaded.uri, item.content_type))
+    return files, media
 
 
 def first_image_showcase(showcases: list[StoredFile]) -> StoredFile | None:

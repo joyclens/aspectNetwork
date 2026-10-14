@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import time
 from typing import Any
 
 import discord
@@ -9,7 +8,6 @@ from discord import ui
 
 from bot.cogs.packages.constants import (
     APPROVE_TEMPLATE,
-    CONFIRM_TEMPLATE,
     DENY_TEMPLATE,
     PURCHASE_TEMPLATE,
     REPORT_TEMPLATE,
@@ -303,86 +301,6 @@ class ReportButton(ui.DynamicItem[ui.Button[Any]], template=REPORT_TEMPLATE):
         await interaction.response.send_modal(ReportModal(self.package_id))
 
 
-class ConfirmPurchaseButton(ui.DynamicItem[ui.Button[Any]], template=CONFIRM_TEMPLATE):
-    def __init__(self, purchase_id: int) -> None:
-        super().__init__(
-            ui.Button(
-                label="I've purchased",
-                style=discord.ButtonStyle.primary,
-                custom_id=f"package:confirm:{purchase_id}",
-            )
-        )
-        self.purchase_id = purchase_id
-
-    @classmethod
-    async def from_custom_id(
-        cls,
-        interaction: Interaction,
-        item: ui.Item[Any],
-        match: re.Match[str],
-    ) -> ConfirmPurchaseButton:
-        return cls(int(match["id"]))
-
-    async def callback(self, interaction: Interaction) -> None:
-        service = _service(interaction)
-        if service is None:
-            return
-        if not service.confirm_ready(interaction.user.id, time.monotonic()):
-            await interaction.response.send_message(
-                view=container_view(ui.TextDisplay("Please wait a few seconds.")),
-                ephemeral=True,
-            )
-            return
-        await interaction.response.defer(ephemeral=True)
-        from bot.shared.checks import database
-
-        client = interaction.client
-        if not isinstance(client, Aspect):
-            return
-        db = database(client)
-        purchase = await db.purchase(self.purchase_id)
-        if purchase is None or purchase.buyer_id != interaction.user.id:
-            await interaction.followup.send(
-                view=container_view(ui.TextDisplay("Purchase not found.")),
-                ephemeral=True,
-            )
-            return
-        if purchase.status != "pending":
-            await interaction.followup.send(
-                view=container_view(ui.TextDisplay("This purchase is no longer pending.")),
-                ephemeral=True,
-            )
-            return
-        package = await db.package(purchase.package_id)
-        if package is None or package.gamepass_id is None:
-            await interaction.followup.send(
-                view=container_view(ui.TextDisplay("Game pass is missing.")),
-                ephemeral=True,
-            )
-            return
-        paid = await service.buyer_paid(
-            purchase.buyer_roblox_id,
-            package.gamepass_id,
-            since=purchase.created_at,
-            refresh=True,
-        )
-        if not paid:
-            await interaction.followup.send(
-                view=container_view(
-                    ui.TextDisplay(
-                        "We're unable to verify your purchase, if you've just bought the game pass, please wait a few minutes and try again."
-                    )
-                ),
-                ephemeral=True,
-            )
-            return
-        await service.complete_purchase(purchase)
-        await interaction.followup.send(
-            view=container_view(ui.TextDisplay("**Thanks for purchasing,** we'll deliver the files shortly.")),
-            ephemeral=True,
-        )
-
-
 class ResendButton(ui.DynamicItem[ui.Button[Any]], template=RESEND_TEMPLATE):
     def __init__(self, purchase_id: int) -> None:
         super().__init__(
@@ -480,12 +398,13 @@ class SettleConfirm(ui.View):
         )
 
 
-def purchase_pending_view(purchase_id: int, gamepass_id: int) -> discord.ui.LayoutView:
+def purchase_pending_view(gamepass_id: int) -> discord.ui.LayoutView:
     return container_view(
         ui.TextDisplay(
             "## Complete Purchase\n"
-            "Buy the game pass, then press **I've purchased**.\n"
-            f"-# Purchase expires in 30 minutes. ID `{purchase_id}`."
+            "Open the game pass and buy it. We'll detect the purchase automatically "
+            "and DM you the files.\n"
+            "-# Usually within a minute. This purchase expires in 30 minutes."
         ),
         ui.ActionRow(
             ui.Button(
@@ -493,7 +412,6 @@ def purchase_pending_view(purchase_id: int, gamepass_id: int) -> discord.ui.Layo
                 style=discord.ButtonStyle.link,
                 url=f"https://www.roblox.com/game-pass/{gamepass_id}",
             ),
-            ConfirmPurchaseButton(purchase_id).item,
         ),
     )
 

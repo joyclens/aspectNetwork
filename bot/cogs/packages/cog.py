@@ -9,11 +9,11 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from bot.cogs.packages.constants import POLL_INTERVAL_SECONDS
+from bot.cogs.packages.layouts import payouts_layout
 from bot.cogs.packages.modals import DetailsModal
 from bot.cogs.packages.service import PackageService
 from bot.cogs.packages.views import (
     ApproveButton,
-    ConfirmPurchaseButton,
     DenyButton,
     PurchaseButton,
     ReportButton,
@@ -39,7 +39,6 @@ class Packages(commands.Cog):
             DenyButton,
             PurchaseButton,
             ReportButton,
-            ConfirmPurchaseButton,
             ResendButton,
         )
         self.poll_purchases.start()
@@ -51,7 +50,6 @@ class Packages(commands.Cog):
             DenyButton,
             PurchaseButton,
             ReportButton,
-            ConfirmPurchaseButton,
             ResendButton,
         )
 
@@ -98,19 +96,11 @@ class Packages(commands.Cog):
                 ephemeral=True,
             )
             return
-        rows = await database(self.bot).payouts_for(interaction.user.id)
-        pending = sum(row.packager_amount for row in rows if row.status == "pending")
-        paid = sum(row.packager_amount for row in rows if row.status == "paid")
+        rows = await database(self.bot).packager_earnings_by_package(interaction.user.id)
         await interaction.response.send_message(
-            view=container_view(
-                discord.ui.TextDisplay(
-                    "## Your Earnings\n"
-                    f"**Pending:** `{pending:,}` R$\n"
-                    f"**Paid:** `{paid:,}` R$\n"
-                    f"**Payouts:** `{len(rows)}`"
-                )
-            ),
+            view=payouts_layout(interaction.user.id, rows, pending_only=False),
             ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @payouts.command(name="summary", description="Pending payout totals per packager")
@@ -152,18 +142,9 @@ class Packages(commands.Cog):
                 ephemeral=True,
             )
             return
-        rows = await database(self.bot).payouts_for(user.id)
-        pending = sum(row.packager_amount for row in rows if row.status == "pending")
-        paid = sum(row.packager_amount for row in rows if row.status == "paid")
+        rows = await database(self.bot).packager_earnings_by_package(user.id)
         await interaction.response.send_message(
-            view=container_view(
-                discord.ui.TextDisplay(
-                    f"## Payouts for {user.mention}\n"
-                    f"**Pending:** `{pending:,}` R$\n"
-                    f"**Paid:** `{paid:,}` R$\n"
-                    f"**Rows:** `{len(rows)}`"
-                )
-            ),
+            view=payouts_layout(user.id, rows, pending_only=False),
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions(users=[user]),
         )

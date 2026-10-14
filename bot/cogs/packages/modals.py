@@ -284,7 +284,7 @@ class PurchaseModal(ui.Modal, title="Purchase Package"):
             )
             return
         await interaction.followup.send(
-            view=purchase_pending_view(purchase.id, package.gamepass_id),
+            view=purchase_pending_view(package.gamepass_id),
             ephemeral=True,
         )
 

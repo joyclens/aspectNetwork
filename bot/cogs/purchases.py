@@ -21,6 +21,50 @@ logger = logging.getLogger("aspect")
 
 _ROBLOX_BACKOFF = 120.0
 _ROBLOX_LOG_EVERY = 300.0
+_PURCHASE_BANNER = (
+    "https://cdn.discordapp.com/attachments/1553889994538750133/"
+    "1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
+    "?ex=6acf58a0&is=6ace0720&hm="
+    "4b79fc195d2f294319e01d01a76782756319a8d26e95abc78e1aed22d3db5ecd&"
+)
+
+
+def sale_item_link(sale: Sale) -> str:
+    name = sale.item_name.replace("`", "'")
+    if sale.item_id and sale.item_type == "GamePass":
+        return f"[{name}](https://www.roblox.com/game-pass/{sale.item_id})"
+    if sale.item_id and sale.item_type == "Asset":
+        return f"[{name}](https://www.roblox.com/catalog/{sale.item_id})"
+    if sale.place_id:
+        return f"[{name}](https://www.roblox.com/games/{sale.place_id})"
+    return f"**{name}**"
+
+
+def sale_log_view(sale: Sale, funds: int) -> ui.LayoutView:
+    profile = (
+        f"https://www.roblox.com/groups/{sale.agent_id}"
+        if sale.agent_type == "Group"
+        else f"https://www.roblox.com/users/{sale.agent_id}/profile"
+    )
+    view = ui.LayoutView()
+    view.add_item(
+        ui.Container(
+            ui.TextDisplay(
+                f"## {Emojis.marketplace} New Purchase\n"
+                f"[**{sale.agent_name}**]({profile}) has purchased an **item** "
+                "from our store."
+            ),
+            ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
+            ui.TextDisplay(
+                f"**Item:** {sale_item_link(sale)}\n"
+                f"**Price:** `{sale.amount:,}` after tax\n"
+                f"**Purchase Date:** <t:{int(sale.created.timestamp())}:f>\n"
+                f"**Group Funds:** `{funds:,}`"
+            ),
+            ui.MediaGallery(discord.MediaGalleryItem(_PURCHASE_BANNER)),
+        )
+    )
+    return view
 
 
 def timeframe_choices(now: datetime) -> list[str]:
@@ -300,9 +344,7 @@ class Purchases(commands.Cog):
         view = ui.LayoutView()
         view.add_item(
             ui.Container(
-                ui.TextDisplay(
-                    f"## {Emojis.marketplace} Purchase Stats\nStats for **{choice}**."
-                ),
+                ui.TextDisplay(f"## {Emojis.marketplace} Purchase Stats\nStats for **{choice}**."),
                 ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 ui.TextDisplay(
                     f"**Purchases:** `{count:,}`\n**Robux Earned:** `{total:,}` after tax"
@@ -340,9 +382,7 @@ class Purchases(commands.Cog):
         if self.bot.roblox_id is None:
             now = time.monotonic()
             if now >= self._roblox_log_at:
-                logger.warning(
-                    "Purchase logs waiting for a valid Roblox cookie session"
-                )
+                logger.warning("Purchase logs waiting for a valid Roblox cookie session")
                 self._roblox_log_at = now + _ROBLOX_LOG_EVERY
             return
         now = time.monotonic()
@@ -369,85 +409,7 @@ class Purchases(commands.Cog):
                     await db.store_setting(f"purchases:{group}:cursor", cursor)
                 return
 
-            found: list[Sale] = []
-            cursor = None
-            for _ in range(8):
-                page, cursor = await roblox.sales(cursor=cursor)
-                if not page:
-                    break
-                known = await db.known_ids([sale.id for sale in page])
-                found.extend(sale for sale in page if sale.id not in known)
-                if known or cursor is None:
-                    break
-            if not found:
-                return
-
-            channel = self.bot.get_channel(Channels.purchase_logs)
-            if channel is None:
-                try:
-                    channel = await self.bot.fetch_channel(Channels.purchase_logs)
-                except discord.HTTPException:
-                    logger.warning(
-                        "Purchase log channel %s is unavailable",
-                        Channels.purchase_logs,
-                    )
-                    return
-            if not isinstance(channel, discord.TextChannel):
-                logger.warning(
-                    "Purchase log channel %s is not a text channel",
-                    Channels.purchase_logs,
-                )
-                return
-            funds, _ = await roblox.balance()
-            posted = 0
-            for sale in list(reversed(found))[:20]:
-                name = sale.item_name.replace("`", "'")
-                if sale.item_id and sale.item_type == "GamePass":
-                    linked = f"[{name}](https://www.roblox.com/game-pass/{sale.item_id})"
-                elif sale.item_id and sale.item_type == "Asset":
-                    linked = f"[{name}](https://www.roblox.com/catalog/{sale.item_id})"
-                elif sale.place_id:
-                    linked = f"[{name}](https://www.roblox.com/games/{sale.place_id})"
-                else:
-                    linked = f"**{name}**"
-                profile = (
-                    f"https://www.roblox.com/groups/{sale.agent_id}"
-                    if sale.agent_type == "Group"
-                    else f"https://www.roblox.com/users/{sale.agent_id}/profile"
-                )
-                view = ui.LayoutView()
-                view.add_item(
-                    ui.Container(
-                        ui.TextDisplay(
-                            f"## {Emojis.marketplace} New Purchase\n"
-                            f"[**{sale.agent_name}**]({profile}) has purchased an **item** "
-                            "from our store."
-                        ),
-                        ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
-                        ui.TextDisplay(
-                            f"**Item:** {linked}\n"
-                            f"**Price:** `{sale.amount:,}` after tax\n"
-                            f"**Purchase Date:** <t:{int(sale.created.timestamp())}:f>\n"
-                            f"**Group Funds:** `{funds:,}`"
-                        ),
-                        ui.MediaGallery(
-                            discord.MediaGalleryItem(
-                                "https://cdn.discordapp.com/attachments/1553889994538750133/"
-                                "1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
-                                "?ex=6acf58a0&is=6ace0720&hm="
-                                "4b79fc195d2f294319e01d01a76782756319a8d26e95abc78e1aed22d3db5ecd&"
-                            ),
-                        ),
-                    )
-                )
-                await channel.send(view=view)
-                await db.store_sales(group, [sale])
-                posted += 1
-            logger.info(
-                "Logged %s new purchase(s) to #%s",
-                posted,
-                channel.name,
-            )
+            await self.ingest_new_sales()
         except RobloxError as exc:
             self._roblox_skip_until = time.monotonic() + _ROBLOX_BACKOFF
             if time.monotonic() >= self._roblox_log_at:
@@ -460,6 +422,53 @@ class Purchases(commands.Cog):
         except discord.HTTPException:
             logger.warning("Could not log a purchase to Discord")
 
+    async def ingest_new_sales(self) -> int:
+        roblox, db = self.bot.roblox, self.bot.db
+        if roblox is None or db is None or self.bot.roblox_id is None:
+            return 0
+        group = App.roblox_group_id
+        found: list[Sale] = []
+        cursor = None
+        for _ in range(8):
+            page, cursor = await roblox.sales(cursor=cursor)
+            if not page:
+                break
+            known = await db.known_ids([sale.id for sale in page])
+            found.extend(sale for sale in page if sale.id not in known)
+            if known or cursor is None:
+                break
+        if not found:
+            return 0
+        channel = self.bot.get_channel(Channels.purchase_logs)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(Channels.purchase_logs)
+            except discord.HTTPException:
+                logger.warning(
+                    "Purchase log channel %s is unavailable",
+                    Channels.purchase_logs,
+                )
+                return 0
+        if not isinstance(channel, discord.TextChannel):
+            logger.warning(
+                "Purchase log channel %s is not a text channel",
+                Channels.purchase_logs,
+            )
+            return 0
+        funds, _ = await roblox.balance()
+        posted = 0
+        for sale in list(reversed(found))[:20]:
+            try:
+                await channel.send(view=sale_log_view(sale, funds))
+            except discord.HTTPException:
+                logger.warning("Could not log purchase %s to Discord", sale.id)
+                continue
+            await db.store_sales(group, [sale])
+            posted += 1
+        if posted:
+            logger.info("Logged %s new purchase(s) to #%s", posted, channel.name)
+        return posted
+
     @watch.before_loop
     async def before_watch(self) -> None:
         await self.bot.wait_until_ready()
@@ -471,9 +480,7 @@ class Purchases(commands.Cog):
                 Channels.purchase_logs,
             )
         else:
-            logger.warning(
-                "Purchase watcher ready, but Roblox is not authenticated yet"
-            )
+            logger.warning("Purchase watcher ready, but Roblox is not authenticated yet")
 
 
 async def setup(bot: Aspect) -> None:

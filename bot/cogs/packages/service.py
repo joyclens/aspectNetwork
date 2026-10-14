@@ -8,7 +8,6 @@ from typing import Any
 import discord
 
 from bot.cogs.packages.constants import (
-    CONFIRM_COOLDOWN_SECONDS,
     FORUM_CHANNELS,
     KIND_GIFT,
     PACKAGER_SHARE_PERCENT,
@@ -18,8 +17,15 @@ from bot.cogs.packages.constants import (
     STATUS_ACCEPTED,
     STATUS_SOLD,
 )
-from bot.cogs.packages.layouts import forum_layout, report_layout, submission_layout
+from bot.cogs.packages.layouts import (
+    delivery_layout,
+    forum_layout,
+    report_layout,
+    submission_layout,
+)
 from bot.cogs.packages.media import (
+    discord_files_and_media,
+    files_and_media_from_attachments,
     first_image_showcase,
     is_image,
     media_from_attachments,
@@ -32,7 +38,6 @@ from bot.core.bot import Aspect
 from bot.core.database import Package, PackagePurchase
 from bot.core.ids import App, Channels, Guild, Roles
 from bot.services.dock import DockError
-from bot.services.roblox import RobloxError
 from bot.shared.checks import database
 from bot.shared.layout import container_view
 
@@ -46,7 +51,6 @@ class PackageService:
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
         self.drafts: dict[int, PackageDraft] = {}
-        self._confirm_at: dict[int, float] = {}
         self._submitting: set[int] = set()
 
     def begin_submit(self, user_id: int) -> bool:
@@ -150,15 +154,30 @@ class PackageService:
         icon = first_image_showcase(draft.showcases) or draft.showcases[0]
         return channel.id, messages[0].id, icon.filename, messages
 
-    def _storage_media(self, messages: list[discord.Message]) -> list[tuple[str, str | None]]:
-        return media_from_attachments(
-            [item for message in messages for item in message.attachments]
-        )
+    def _storage_attachments(self, messages: list[discord.Message]) -> list[discord.Attachment]:
+        return [item for message in messages for item in message.attachments]
+
+    async def _storage_files_and_media(
+        self,
+        messages: list[discord.Message],
+        *,
+        showcase_only: bool = False,
+    ) -> tuple[list[discord.File], list[tuple[str, str | None]]]:
+        attachments = self._storage_attachments(messages)
+        if showcase_only:
+            preferred = [
+                item
+                for item in attachments
+                if item.filename.startswith("showcase_")
+                or is_image(item.content_type, item.filename)
+            ]
+            attachments = preferred[:1] or attachments[:1]
+        return await files_and_media_from_attachments(attachments)
 
     async def submit_final(self, interaction: Interaction, draft: PackageDraft) -> Package:
         from bot.cogs.packages.views import ApproveButton, DenyButton
 
-        channel_id, message_id, showcase_name, storage_messages = await self.store_files(draft)
+        channel_id, message_id, showcase_name, _storage_messages = await self.store_files(draft)
         submissions = await self.channel(Channels.package_submissions)
         if not isinstance(submissions, discord.TextChannel):
             raise RuntimeError("Package submissions channel is unavailable.")
@@ -180,13 +199,14 @@ class PackageService:
             submission_message_id=0,
             showcase_filename=showcase_name,
         )
-        media = self._storage_media(storage_messages)
+        files, media = discord_files_and_media(draft.showcases, draft.files)
         posted = await submissions.send(
             view=submission_layout(
                 package,
                 media=media or None,
                 buttons=[ApproveButton(package.id).item, DenyButton(package.id).item],
             ),
+            files=files,
             allowed_mentions=discord.AllowedMentions.none(),
         )
         await db.set_package_submission(package.id, posted.id)
@@ -214,14 +234,17 @@ class PackageService:
                 price=claimed.price,
             )
             storage_messages = await self._storage_messages(claimed)
-            storage_media = self._storage_media(storage_messages)
+            storage_files, storage_media = await self._storage_files_and_media(storage_messages)
             icon_note = await self._upload_showcase_icon(
                 client,
                 claimed,
                 gamepass_id,
                 storage_messages,
             )
-            forum_media = self._forum_media(storage_media)
+            forum_files, forum_media = await self._storage_files_and_media(
+                storage_messages,
+                showcase_only=True,
+            )
             forum_id = FORUM_CHANNELS.get(claimed.package_type, 0)
             forum = await self.channel(forum_id)
             if not isinstance(forum, discord.ForumChannel):
@@ -230,12 +253,13 @@ class PackageService:
                 name=claimed.title[:100],
                 view=forum_layout(
                     claimed,
-                    media=forum_media,
+                    media=forum_media or None,
                     buttons=[
                         PurchaseButton(claimed.id).item,
                         ReportButton(claimed.id).item,
                     ],
                 ),
+                files=forum_files,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             accepted = await db.accept_package(
@@ -255,6 +279,7 @@ class PackageService:
                     status_line=f"-# Approved by <@{interaction.user.id}>{icon_note}",
                     buttons=None,
                 ),
+                files=storage_files,
             )
             await self._dm(
                 accepted.packager_id,
@@ -287,27 +312,19 @@ class PackageService:
             return f" Icon upload failed: {reviewer_message(exc)}"
         return ""
 
-    def _forum_media(
-        self,
-        storage_media: list[tuple[str, str | None]],
-    ) -> list[tuple[str, str | None]] | None:
-        for url, content_type in storage_media:
-            name = url.rsplit("/", 1)[-1].split("?", 1)[0]
-            if is_image(content_type, name) or name.startswith("showcase_"):
-                return [(url, content_type)]
-        return storage_media[:1] or None
-
     async def _edit_submission(
         self,
         message: discord.Message | None,
         view: discord.ui.LayoutView,
+        *,
+        files: list[discord.File] | None = None,
     ) -> None:
         if message is None:
             return
         try:
             await message.edit(
                 view=view,
-                attachments=[],
+                attachments=files if files is not None else list(message.attachments),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException:
@@ -322,7 +339,7 @@ class PackageService:
         denied = await db.deny_package(package_id, interaction.user.id)
         if denied is None:
             return "This package cannot be denied."
-        media = self._storage_media(await self._storage_messages(denied))
+        files, media = await self._storage_files_and_media(await self._storage_messages(denied))
         await self._edit_submission(
             interaction.message,
             submission_layout(
@@ -331,6 +348,7 @@ class PackageService:
                 status_line=f"-# Denied by <@{interaction.user.id}>: {reason}",
                 buttons=None,
             ),
+            files=files,
         )
         await self._dm(
             denied.packager_id,
@@ -386,24 +404,15 @@ class PackageService:
         )
         return purchase, None
 
-    def confirm_ready(self, user_id: int, now: float) -> bool:
-        last = self._confirm_at.get(user_id, 0)
-        if now - last < CONFIRM_COOLDOWN_SECONDS:
-            return False
-        self._confirm_at[user_id] = now
-        return True
-
     async def sync_recent_sales(self) -> None:
-        roblox = self.bot.roblox
-        if roblox is None:
+        cog = self.bot.get_cog("Purchases")
+        ingest = getattr(cog, "ingest_new_sales", None)
+        if ingest is None:
             return
         try:
-            page, _cursor = await roblox.sales()
-        except RobloxError:
+            await ingest()
+        except Exception:
             logger.warning("Could not refresh group sales for package payment check")
-            return
-        if page:
-            await database(self.bot).store_sales(App.roblox_group_id, page)
 
     async def buyer_paid(
         self,
@@ -457,7 +466,7 @@ class PackageService:
         files = await self._storage_files(package)
         if not files:
             return False
-        ok = await self._dm_files(target_id, package, files)
+        ok = await self._dm_files(target_id, files)
         if purchase.kind == KIND_GIFT:
             await self._dm(
                 purchase.buyer_id,
@@ -554,27 +563,33 @@ class PackageService:
     async def _dm_files(
         self,
         user_id: int,
-        package: Package,
         files: list[discord.File],
     ) -> bool:
         try:
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-            await user.send(
-                view=container_view(discord.ui.TextDisplay(f"Files for **{package.title}**:")),
-            )
+            batches: list[list[discord.File]] = []
             batch: list[discord.File] = []
             size = 0
             for item in files:
                 raw = item.fp.read()
                 item.fp.seek(0)
-                if batch and size + len(raw) > DM_BATCH_BYTES:
-                    await user.send(files=batch)
+                if batch and (len(batch) >= 10 or size + len(raw) > DM_BATCH_BYTES):
+                    batches.append(batch)
                     batch = []
                     size = 0
                 batch.append(discord.File(io.BytesIO(raw), filename=item.filename))
                 size += len(raw)
             if batch:
-                await user.send(files=batch)
+                batches.append(batch)
+            if not batches:
+                return False
+            first, *rest = batches
+            await user.send(view=delivery_layout(first), files=first)
+            for extra in rest:
+                await user.send(
+                    view=delivery_layout(extra),
+                    files=extra,
+                )
             return True
         except discord.HTTPException:
             return False
