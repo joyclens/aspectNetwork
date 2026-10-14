@@ -76,8 +76,8 @@ class Channels:
 class Roles:
     verified: Final[int] = 1559883463845478481
     ticket_support: Final[int] = 1559883485466857563
-    packager: Final[int] = 0
-    management: Final[int] = 0
+    packager: Final[int] = 1560021566400757850
+    management: Final[int] = 1559883485466857563
 
 
 class Users:
