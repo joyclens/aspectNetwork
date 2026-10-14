@@ -17,7 +17,7 @@ class Utility(commands.Cog):
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     @commands.hybrid_command(
-        name="say"
+        name="say",
         description="Send a message as the bot",
         )  # type: ignore[arg-type]
     @app_commands.describe(message="Text to send in this channel")

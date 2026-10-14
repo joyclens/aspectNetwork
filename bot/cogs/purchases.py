@@ -365,9 +365,9 @@ class Purchases(commands.Cog):
             if not found:
                 return
 
-            channel = self.bot.get_channel(Channels.marketplace)
+            channel = self.bot.get_channel(Channels.purchase_logs)
             if channel is None:
-                channel = await self.bot.fetch_channel(Channels.marketplace)
+                channel = await self.bot.fetch_channel(Channels.purchase_logs)
             if not isinstance(channel, discord.TextChannel):
                 return
             funds, _ = await roblox.balance()

@@ -48,6 +48,7 @@ class Channels:
     verify: Final[int] = 1559306245901389907
     marketplace: Final[int] = 1559893992106233866
     ticket_logs: Final[int] = 1559883403996823552
+    purchase_logs: Final[int] = 1559896562426060860
 
 
 class Roles:
