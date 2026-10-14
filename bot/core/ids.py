@@ -79,3 +79,6 @@ class Emojis:
     event: Final[str] = "<:event:1551256173901250580>"
     people: Final[str] = "<:people:1551256195585540306>"
     person: Final[str] = "<:person:1551256197456330813>"
+    newsletter: Final[str] = "<:newsletter:1551256177667612713>"
+    suggestion: Final[str] = "<:suggestion:1551256131471679619>"
+    fullstar: Final[str] = "<:fullstar:1551256125968752710>"
