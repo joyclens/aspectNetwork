@@ -199,7 +199,7 @@ def payouts_layout(
         if pending_only
         else (
             "## Package Earnings\n"
-            f"<@{packager_id}> — pending **{pending_total:,}** R$ · "
+            f"<@{packager_id}> - pending **{pending_total:,}** R$ · "
             f"paid **{sum(row.paid_total for row in rows):,}** R$ · "
             f"**{sum(row.sales for row in rows)}** sale(s)."
         )
@@ -216,13 +216,13 @@ def payouts_layout(
         for index, row in enumerate(visible[:25], start=1):
             if pending_only:
                 lines.append(
-                    f"`{index}.` {_package_jump(row)} — "
+                    f"`{index}.` {_package_jump(row)} - "
                     f"**{row.pending_total:,}** R$ pending "
                     f"(`{row.pending_sales}` sale(s))."
                 )
             else:
                 lines.append(
-                    f"`{index}.` {_package_jump(row)} — "
+                    f"`{index}.` {_package_jump(row)} - "
                     f"**{row.earned:,}** R$ earned · `{row.sales}` sale(s) · "
                     f"**{row.pending_total:,}** pending."
                 )

@@ -118,7 +118,7 @@ class Packages(commands.Cog):
             text = "No payouts yet."
         else:
             text = "## Payout Summary\n" + "\n".join(
-                f"<@{row.packager_id}> — pending `{row.pending_total:,}` "
+                f"<@{row.packager_id}> - pending `{row.pending_total:,}` "
                 f"(`{row.pending_count}`) · paid `{row.paid_total:,}`"
                 for row in rows
             )

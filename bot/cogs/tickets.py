@@ -615,7 +615,7 @@ class Tickets(commands.Cog):
         for index, (user_id, claims) in enumerate(rows, start=1):
             member = ctx.guild.get_member(user_id) if ctx.guild else None
             label = member.display_name if member else f"User {user_id}"
-            lines.append(f"`{index}.` **{label}** — `{claims:,}` claims")
+            lines.append(f"`{index}.` **{label}** - `{claims:,}` claims")
         view = ui.LayoutView()
         view.add_item(ui.Container(ui.TextDisplay("\n".join(lines))))
         await ctx.send(view=view)
