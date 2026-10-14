@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import os
 from contextlib import suppress
 
+from dotenv import load_dotenv
 from pydantic import ValidationError
 
 from bot.core.bot import Aspect
@@ -15,10 +15,11 @@ from bot.core.logging import setup_logging
 
 async def run(settings: Settings) -> None:
     async with Aspect(settings) as bot:
-        await bot.start(os.environ.get("DISCORD_TOKEN"))
+        await bot.start(Secrets.discord_token)
 
 
 def main() -> None:
+    load_dotenv()
     try:
         settings = load_settings()
     except ValidationError:
