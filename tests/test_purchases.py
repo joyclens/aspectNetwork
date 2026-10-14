@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from bot.cogs.purchases import History
-from bot.services.roblox import RobloxError, Sale, parse_sales
+from bot.services.roblox import RobloxError, Sale, normalize_cookie, parse_sales
 
 
 def _sale(**overrides: object) -> Sale:
@@ -63,6 +63,41 @@ def test_parse_sales() -> None:
 def test_parse_sales_rejects_garbage() -> None:
     with pytest.raises(RobloxError):
         parse_sales({"data": [{"created": "nope"}]})
+
+
+def test_parse_sales_id_hash() -> None:
+    sales, cursor = parse_sales(
+        {
+            "nextPageCursor": None,
+            "data": [
+                {
+                    "id": 0,
+                    "idHash": "vQqd/90s/FTIO0XUpVLnBw",
+                    "created": "2026-10-10T17:23:25.801Z",
+                    "isPending": True,
+                    "agent": {"id": 2733897535, "type": "User", "name": "Derpytoez232"},
+                    "details": {"id": 91741173371014, "name": "4000", "type": "Asset"},
+                    "currency": {"amount": 2800, "type": "Robux"},
+                    "purchaseToken": "2df6e45e-c390-4a92-bc09-a6aae00dafcc",
+                }
+            ],
+        }
+    )
+    assert cursor is None
+    assert len(sales) == 1
+    assert sales[0].id > 0
+    assert sales[0].pending is True
+    assert sales[0].amount == 2800
+
+
+def test_normalize_cookie_keeps_warning_prefix() -> None:
+    raw = (
+        "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you"
+        "-and-to-steal-your-ROBUX-and-items.|_CAEQAhoGCAIQBBgBIh"
+    )
+    assert normalize_cookie(raw) == raw
+    assert normalize_cookie(f".ROBLOSECURITY={raw}") == raw
+    assert normalize_cookie(f'"{raw}"') == raw
 
 
 def test_history_paginates_only_past_five() -> None:

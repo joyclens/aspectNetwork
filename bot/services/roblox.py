@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any, TypeVar
@@ -160,6 +161,32 @@ def _positive(value: int | None) -> int | None:
     return value
 
 
+def normalize_cookie(cookie: str) -> str:
+    """Keep the full .ROBLOSECURITY value, including the WARNING prefix."""
+    raw = cookie.strip().strip('"').strip("'")
+    for prefix in (".ROBLOSECURITY=", "ROBLOSECURITY="):
+        if raw.upper().startswith(prefix.upper()):
+            raw = raw[len(prefix) :].strip()
+            break
+    return raw
+
+
+def _stable_sale_id(api_id: int, row: dict[str, Any]) -> int | None:
+    if 1 <= api_id <= _MAX_ID:
+        return api_id
+    for key in ("idHash", "purchaseToken"):
+        raw = row.get(key)
+        if not isinstance(raw, str):
+            continue
+        text = raw.strip()
+        if not text:
+            continue
+        digest = hashlib.blake2b(text.encode(), digest_size=8).digest()
+        value = int.from_bytes(digest, "big") % _MAX_ID
+        return value or 1
+    return None
+
+
 def _sale(row: Any) -> Sale | None:
     if not isinstance(row, dict):
         return None
@@ -167,7 +194,8 @@ def _sale(row: Any) -> Sale | None:
         parsed = _Txn.model_validate(row)
     except ValidationError:
         return None
-    if not 1 <= parsed.id <= _MAX_ID or not 1 <= parsed.agent.id <= _MAX_ID:
+    sale_id = _stable_sale_id(parsed.id, row)
+    if sale_id is None or not 1 <= parsed.agent.id <= _MAX_ID:
         return None
     details = parsed.details
     money = parsed.currency or (details.currency if details else None)
@@ -179,7 +207,7 @@ def _sale(row: Any) -> Sale | None:
         created = created.replace(tzinfo=UTC)
     item_name = (details.name if details and details.name else "Item").strip() or "Item"
     return Sale(
-        id=parsed.id,
+        id=sale_id,
         created=created,
         pending=parsed.is_pending,
         agent_id=parsed.agent.id,
@@ -224,7 +252,10 @@ class Roblox:
     ) -> None:
         if group_id < 1:
             raise ValueError("invalid group")
-        self._cookie = cookie
+        normalized = normalize_cookie(cookie)
+        if len(normalized) < 8 or any(char in normalized for char in "\r\n"):
+            raise ValueError("invalid cookie")
+        self._cookie = normalized
         self._group_id = group_id
         self._csrf: str | None = None
         self._session = http

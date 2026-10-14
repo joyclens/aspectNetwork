@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator
 
 from bot.core.ids import App, Secrets
+from bot.services.roblox import normalize_cookie
 
 
 class Settings(BaseModel):
@@ -26,7 +27,10 @@ class Settings(BaseModel):
     @classmethod
     def secret_ok(cls, value: object, info: ValidationInfo) -> SecretStr:
         raw = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
-        raw = raw.strip()
+        if info.field_name == "roblox_cookie":
+            raw = normalize_cookie(str(raw))
+        else:
+            raw = raw.strip()
         if len(raw) < 8 or any(char in raw for char in "\r\n"):
             raise ValueError("invalid secret")
         if info.field_name == "postgres_dsn" and not raw.startswith(
