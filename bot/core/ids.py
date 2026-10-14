@@ -19,7 +19,7 @@ def partial_emoji(token: str) -> discord.PartialEmoji:
 
 class _Secrets:
     _roblox_cookie: Final[str] = (
-        "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-"
+        ".ROBLOSECURITY=_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you-"
         "and-to-steal-your-ROBUX-and-items.|_CAEQAhoGCAIQBBgBIhwKBGR1aWQSFDEyNTkyNDg3Mzkw"
         "NDg2MjE3Mjk1IhgKBXVuYW1lEg9ldm9pYU1hbmFnZW1lbnQiEQoDdWlkEgo3MjY0MDM0MDI1KAM."
         "uHFN-l05nojS2OTas7Bus4FLNzw_El7qJ7ZoHqIB80d2iOkpFPZAUMkhHq6wVOSuvTwzMp0K31urXittk"
