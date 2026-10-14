@@ -541,7 +541,7 @@ class PackageService:
     async def _notify_packager_sale(self, package: Package, purchase: PackagePurchase) -> None:
         text = (
             f"Your package **{package.title}** sold "
-            f"(`{package.price:,}` R$). Purchase `{purchase.id}`."
+            f"(`{package.price:,}` R$), purchase `{purchase.id}`."
         )
         if await self._dm(package.packager_id, text):
             return

@@ -195,12 +195,12 @@ def payouts_layout(
     pending_total = sum(row.pending_total for row in rows)
     header = (
         "## Pending Payouts\n"
-        f"<@{packager_id}> has a total of **{pending_total:,}** R$ pending."
+        f"<@{packager_id}> has a total of **{pending_total:,}** <:robux:1559293111329619991> pending."
         if pending_only
         else (
             "## Package Earnings\n"
-            f"<@{packager_id}> - pending **{pending_total:,}** R$ · "
-            f"paid **{sum(row.paid_total for row in rows):,}** R$ · "
+            f"<@{packager_id}> - pending <:robux:1559293111329619991> **{pending_total:,}** · "
+            f"paid <:robux:1559293111329619991> **{sum(row.paid_total for row in rows):,}** · "
             f"**{sum(row.sales for row in rows)}** sale(s)."
         )
     )
@@ -217,14 +217,14 @@ def payouts_layout(
             if pending_only:
                 lines.append(
                     f"`{index}.` {_package_jump(row)} - "
-                    f"**{row.pending_total:,}** R$ pending "
+                    f"<:robux:1559293111329619991> **{row.pending_total:,}** pending "
                     f"(`{row.pending_sales}` sale(s))."
                 )
             else:
                 lines.append(
                     f"`{index}.` {_package_jump(row)} - "
-                    f"**{row.earned:,}** R$ earned · `{row.sales}` sale(s) · "
-                    f"**{row.pending_total:,}** pending."
+                    f"<:robux:1559293111329619991> **{row.earned:,}** earned · `{row.sales}` sale(s) · "
+                    f"<:robux:1559293111329619991> **{row.pending_total:,}** pending."
                 )
     items.append(ui.TextDisplay("\n".join(lines)))
     items.append(ui.Separator(visible=False))

@@ -37,8 +37,8 @@ class Economy(commands.Cog):
         view.add_item(
             ui.Container(
                 ui.TextDisplay(
-                    f"{Emojis.robux} The group currently has **R${robux:,}** "
-                    f"robux available, with an additional **R${pending:,}** pending."
+                    f"{Emojis.robux} The group currently has **{robux:,}** "
+                    f"robux available, with an additional **{pending:,}** pending."
                 ),
                 ui.MediaGallery(
                     discord.MediaGalleryItem(
