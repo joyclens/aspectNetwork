@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import discord
 from discord.ext import commands
 
+from bot.core.ids import Emojis
 from bot.shared.layout import AspectLayout, container_view
 
 if TYPE_CHECKING:
@@ -49,12 +50,12 @@ class Context(commands.Context["Aspect"]):
     bot: Aspect
 
     async def approve(self, text: str) -> discord.Message:
-        return await self.send(view=self._view(text, self.bot.settings.emojis.approve))
+        return await self.send(view=self._view(text, Emojis.approve))
 
     async def warn(self, text: str, **kwargs: Any) -> discord.Message:
         if self.interaction is not None:
             kwargs.setdefault("ephemeral", True)
-        return await self.send(view=self._view(text, self.bot.settings.emojis.warn), **kwargs)
+        return await self.send(view=self._view(text, Emojis.warn), **kwargs)
 
     async def prompt(self, text: str) -> Literal[True]:
         command_name = self.command.qualified_name if self.command else "unknown"

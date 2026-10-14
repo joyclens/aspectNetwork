@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 
 from bot.core.bot import Aspect
+from bot.core.ids import Channels, Emojis, Guild
 from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")
@@ -17,12 +18,12 @@ class Welcome(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
-        if member.bot or member.guild.id != self.bot.settings.discord_guild_id:
+        if member.bot or member.guild.id != Guild.id:
             return
-        channel = self.bot.get_channel(1551307570822779020)
+        channel = self.bot.get_channel(Channels.welcome)
         if channel is None:
             try:
-                channel = await self.bot.fetch_channel(1551307570822779020)
+                channel = await self.bot.fetch_channel(Channels.welcome)
             except discord.HTTPException:
                 logger.warning("Welcome channel is unavailable")
                 return
@@ -30,16 +31,20 @@ class Welcome(commands.Cog):
             logger.warning("Welcome channel is unavailable")
             return
         count = member.guild.member_count or len(member.guild.members)
+        marketplace = (
+            f"https://discordapp.com/channels/{Guild.id}/{Channels.marketplace}"
+        )
+        dashboard = f"https://discordapp.com/channels/{Guild.id}/{Channels.dashboard}"
         try:
             await channel.send(
                 view=container_view(
                     discord.ui.TextDisplay(
-                        "<:affiliate:1551256291043971202> "
+                        f"{Emojis.affiliate} "
                         f"Welcome <@{member.id}> to **Aspect Network**! "
                         "We are pleased to have you join our journey "
                         "to become *Your Ideal Connection*.\n"
                         "-# And don't forget to check out our "
-                        "**[marketplace](https://discordapp.com/channels/1559284770440216639/1529142741110358027)**"
+                        f"**[marketplace]({marketplace})**"
                     ),
                     discord.ui.ActionRow(
                         discord.ui.Button(
@@ -50,7 +55,7 @@ class Welcome(commands.Cog):
                         discord.ui.Button(
                             label="View our Dashboard",
                             style=discord.ButtonStyle.link,
-                            url="https://discordapp.com/channels/1559284770440216639/1529141669340123257",
+                            url=dashboard,
                         ),
                     ),
                 ),

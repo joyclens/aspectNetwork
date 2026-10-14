@@ -1,27 +1,12 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationInfo, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator
+
+from bot.core.ids import App, Secrets
 
 
-class Emojis(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    approve: str = "<:checkmark:1551257148917424128>"
-    warn: str = "<:warning:1551256110869127168>"
-    error: str = "<:xmark:1551256137419202673>"
-    robux: str = "<:robux:1559293111329619991>"
-    loading: str = "<:hourglass:1559294195401887774>"
-
-
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
+class Settings(BaseModel):
     discord_token: SecretStr
-    discord_guild_id: int = Field(gt=0)
     command_prefix: str = "!"
     postgres_dsn: SecretStr
     roblox_cookie: SecretStr
@@ -29,10 +14,6 @@ class Settings(BaseSettings):
     dock_api_key: SecretStr | None = None
     dock_pid: str | None = None
     cookie_api_key: SecretStr | None = None
-    verified_role_id: int | None = Field(default=None, gt=0)
-    ticket_support_role_id: int | None = Field(default=None, gt=0)
-    ticket_logs_channel_id: int | None = Field(default=None, gt=0)
-    emojis: Emojis = Field(default_factory=Emojis)
 
     @field_validator("command_prefix")
     @classmethod
@@ -41,10 +22,11 @@ class Settings(BaseSettings):
             raise ValueError("invalid prefix")
         return value
 
-    @field_validator("discord_token", "roblox_cookie", "postgres_dsn")
+    @field_validator("discord_token", "roblox_cookie", "postgres_dsn", mode="before")
     @classmethod
-    def secret_ok(cls, value: SecretStr, info: ValidationInfo) -> SecretStr:
-        raw = value.get_secret_value().strip()
+    def secret_ok(cls, value: object, info: ValidationInfo) -> SecretStr:
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
+        raw = raw.strip()
         if len(raw) < 8 or any(char in raw for char in "\r\n"):
             raise ValueError("invalid secret")
         if info.field_name == "postgres_dsn" and not raw.startswith(
@@ -53,12 +35,13 @@ class Settings(BaseSettings):
             raise ValueError("invalid postgres dsn")
         return SecretStr(raw)
 
-    @field_validator("dock_api_key", "cookie_api_key")
+    @field_validator("dock_api_key", "cookie_api_key", mode="before")
     @classmethod
-    def optional_key_ok(cls, value: SecretStr | None) -> SecretStr | None:
+    def optional_key_ok(cls, value: object) -> SecretStr | None:
         if value is None:
             return None
-        raw = value.get_secret_value().strip()
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else str(value)
+        raw = raw.strip()
         if not raw:
             return None
         if len(raw) < 8 or any(char in raw for char in "\r\n"):
@@ -76,3 +59,16 @@ class Settings(BaseSettings):
         if any(char in raw for char in "\r\n ") or len(raw) > 64:
             raise ValueError("invalid pid")
         return raw
+
+
+def load_settings() -> Settings:
+    return Settings(
+        discord_token=Secrets.discord_token,
+        command_prefix=App.command_prefix,
+        postgres_dsn=Secrets.postgres_dsn,
+        roblox_cookie=Secrets.roblox_cookie,
+        roblox_group_id=App.roblox_group_id,
+        dock_api_key=Secrets.dock_api_key,
+        dock_pid=Secrets.dock_pid,
+        cookie_api_key=Secrets.cookie_api_key,
+    )

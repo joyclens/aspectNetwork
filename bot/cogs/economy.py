@@ -7,6 +7,7 @@ from discord import ui
 from discord.ext import commands
 
 from bot.core.bot import Aspect
+from bot.core.ids import Emojis
 from bot.shared.context import require_context
 
 
@@ -36,11 +37,8 @@ class Economy(commands.Cog):
         view.add_item(
             ui.Container(
                 ui.TextDisplay(
-                    "<:robux:1559293111329619991> The group currently has **R${}** "
-                    "robux available, with an additional **R${}** pending.".format(
-                        f"{robux:,}",
-                        f"{pending:,}",
-                    )
+                    f"{Emojis.robux} The group currently has **R${robux:,}** "
+                    f"robux available, with an additional **R${pending:,}** pending."
                 ),
                 ui.MediaGallery(
                     discord.MediaGalleryItem(

@@ -14,6 +14,7 @@ from discord.ext import commands, tasks
 
 from bot.core.bot import Aspect
 from bot.core.database import Giveaway, SponsoredServer
+from bot.core.ids import Emojis, partial_emoji
 from bot.shared.checks import database
 from bot.shared.context import require_context
 from bot.shared.converters import Duration
@@ -151,16 +152,14 @@ def requirements_text(row: Giveaway) -> str | None:
         servers = " · ".join(
             f"[**{server.name}**]({server.invite})" for server in row.required_servers
         )
-        lines.append(f"<:discord:1551257778109284352>  **Required Server:** {servers}")
+        lines.append(f"{Emojis.discord}  **Required Server:** {servers}")
     if row.required_roles:
         lines.append(
-            "<:userLocked:1559577156399529984> **Required Role:** "
-            + mention_roles(row.required_roles)
+            f"{Emojis.user_locked} **Required Role:** " + mention_roles(row.required_roles)
         )
     if row.ignore_roles:
         lines.append(
-            "<:userSlash:1559577141216157746> **Restricted Role:** "
-            + mention_roles(row.ignore_roles)
+            f"{Emojis.user_slash} **Restricted Role:** " + mention_roles(row.ignore_roles)
         )
     return "\n".join(lines) if lines else None
 
@@ -168,7 +167,7 @@ def requirements_text(row: Giveaway) -> str | None:
 class JoinButton(ui.Button[Any]):
     def __init__(self) -> None:
         super().__init__(
-            emoji=discord.PartialEmoji(name="confetti", id=1551256166074687519),
+            emoji=partial_emoji(Emojis.confetti),
             style=discord.ButtonStyle.gray,
             custom_id=JOIN_ID,
         )
@@ -222,16 +221,16 @@ def _layout_items(
     moment = datetime.now(UTC) if ended else row.finish
     label = "Ended" if ended else "Duration"
     winner_line = (
-        f"<:confetti:1551256166074687519>  **Winners:** {winners}"
+        f"{Emojis.confetti}  **Winners:** {winners}"
         if winners is not None
-        else f"<:confetti:1551256166074687519>  **Winners:** `{row.winners}`"
+        else f"{Emojis.confetti}  **Winners:** `{row.winners}`"
     )
     items: list[ui.Item[Any]] = [
         ui.TextDisplay(
-            f"## <:giveaway:1551256171728347279> {row.title}\n"
+            f"## {Emojis.giveaway} {row.title}\n"
             f"{winner_line}\n"
-            f"<:event:1551256173901250580> **{label}:** {timestamp(moment)}\n"
-            f"<:people:1551256195585540306> **Entries:** `{len(set(row.members)):,}`"
+            f"{Emojis.event} **{label}:** {timestamp(moment)}\n"
+            f"{Emojis.people} **Entries:** `{len(set(row.members)):,}`"
         )
     ]
     reqs = requirements_text(row)
@@ -241,7 +240,7 @@ def _layout_items(
         [
             ui.Separator(visible=True),
             ui.TextDisplay(
-                "-# <:person:1551256197456330813> Giveaway hosted by " + mention_user(row.host_id)
+                f"-# {Emojis.person} Giveaway hosted by " + mention_user(row.host_id)
             ),
         ]
     )

@@ -13,6 +13,7 @@ from discord.ext import commands
 from bot import __version__
 from bot.core.config import Settings
 from bot.core.database import Database, connect
+from bot.core.ids import App, Guild, Secrets
 from bot.core.ux import print_banner
 from bot.services.cookie import Cookie
 from bot.services.dock import Dock
@@ -46,7 +47,7 @@ def _discover(folder: str) -> list[str]:
 class Aspect(commands.Bot):
     def __init__(self, settings: Settings) -> None:
         super().__init__(
-            command_prefix=settings.command_prefix,
+            command_prefix=App.command_prefix,
             case_insensitive=True,
             strip_after_prefix=True,
             intents=discord.Intents.all(),
@@ -105,10 +106,10 @@ class Aspect(commands.Bot):
 
     async def setup_hook(self) -> None:
         self.session = session(timeout=40)
-        self.db, self.db_version = await connect(self.settings.postgres_dsn.get_secret_value())
+        self.db, self.db_version = await connect(Secrets.postgres_dsn)
         self.roblox = Roblox(
-            self.settings.roblox_cookie.get_secret_value(),
-            self.settings.roblox_group_id,
+            Secrets.roblox_cookie,
+            App.roblox_group_id,
             self.session,
         )
         await self.roblox.start()
@@ -226,8 +227,8 @@ class Aspect(commands.Bot):
         logger.info("Roblox session ready for %s", account.name)
 
     async def _start_dock(self) -> None:
-        key = self.settings.dock_api_key
-        pid = self.settings.dock_pid
+        key = Secrets.dock_api_key
+        pid = Secrets.dock_pid
         if key is None or pid is None:
             if key is not None or pid is not None:
                 logger.warning("Dock verification is missing its api key or pid")
@@ -235,20 +236,20 @@ class Aspect(commands.Bot):
         if self.session is None:
             logger.warning("Dock verification is missing its http session")
             return
-        self.dock = Dock(key.get_secret_value(), pid, self.session)
+        self.dock = Dock(key, pid, self.session)
         await self.dock.start()
 
     async def _start_cookie(self) -> None:
-        key = self.settings.cookie_api_key
+        key = Secrets.cookie_api_key
         if key is None:
             return
         if self.session is None:
             logger.warning("Cookie transcripts are missing their http session")
             return
-        self.cookie = Cookie(key.get_secret_value(), self.session)
+        self.cookie = Cookie(key, self.session)
 
     async def _sync_commands(self) -> None:
-        guild = discord.Object(id=self.settings.discord_guild_id)
+        guild = discord.Object(id=Guild.id)
         self.tree.copy_global_to(guild=guild)
         try:
             synced = await self.tree.sync(guild=guild)

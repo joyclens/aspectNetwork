@@ -9,11 +9,10 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from bot.core.ids import Emojis, Users
 from bot.core.logging import secret_values
 
 logger = logging.getLogger("aspect")
-
-_REPORT_USER = 1465469795813298287
 
 
 class DatabaseUnavailable(commands.CheckFailure):
@@ -24,12 +23,12 @@ class DatabaseUnavailable(commands.CheckFailure):
 def error_notice(code: str) -> str:
     return (
         "**Sorry!** I encountered an error, please forward this error ID "
-        f"to <@{_REPORT_USER}>: `{code}`"
+        f"to <@{Users.error_report}>: `{code}`"
     )
 
 
 def error_mentions() -> discord.AllowedMentions:
-    return discord.AllowedMentions(users=[discord.Object(id=_REPORT_USER)])
+    return discord.AllowedMentions(users=[discord.Object(id=Users.error_report)])
 
 
 def remember_error(
@@ -77,7 +76,7 @@ async def report_interaction(
         logger.error("%s", where, exc_info=(type(error), error, error.__traceback__))
         return
     code = remember_error(client.traceback, error, where=where)
-    emoji = client.settings.emojis.error
+    emoji = Emojis.error
     view = discord.ui.LayoutView()
     view.add_item(discord.ui.Container(discord.ui.TextDisplay(f"{emoji} {error_notice(code)}")))
     try:

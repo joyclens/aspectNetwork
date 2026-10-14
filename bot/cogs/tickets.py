@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from bot.core.bot import Aspect
 from bot.core.database import Ticket
+from bot.core.ids import Channels, Emojis, Roles, Secrets, partial_emoji
 from bot.services.cookie import CookieError
 from bot.shared.checks import database
 from bot.shared.context import require_context
@@ -18,8 +19,6 @@ from bot.shared.layout import AspectLayout, container_view
 
 logger = logging.getLogger("aspect")
 
-DASHBOARD = 1529141669340123257
-CATEGORY = 1531807371095969802
 FOOTER = (
     "https://cdn.discordapp.com/attachments/1553889994538750133/"
     "1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
@@ -76,7 +75,7 @@ def regulations_view() -> ui.LayoutView:
     view.add_item(
         ui.Container(
             ui.MediaGallery(discord.MediaGalleryItem(REGULATIONS_BANNER)),
-            ui.TextDisplay("## <:regulations:1556098910223728720> Aspect Network Regulations"),
+            ui.TextDisplay(f"## {Emojis.regulations} Aspect Network Regulations"),
             ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
             ui.TextDisplay(
                 "**Respect**\n"
@@ -127,7 +126,7 @@ def regulations_view() -> ui.LayoutView:
                 "[**Discord's Terms of Service**](https://discord.com/terms) and "
                 "[**Discord's Community Guidelines**](https://discord.com/guidelines). "
                 "Our Marketplace Terms of Service can be found in the "
-                "<:marketplace:1551256187301797970> **Aspect Marketplace**."
+                f"{Emojis.marketplace} **Aspect Marketplace**."
             ),
             ui.MediaGallery(discord.MediaGalleryItem(FOOTER)),
         )
@@ -140,7 +139,7 @@ def packages_view() -> ui.LayoutView:
     view.add_item(
         ui.Container(
             ui.MediaGallery(discord.MediaGalleryItem(PACKAGES_BANNER)),
-            ui.TextDisplay("## <:regulations:1556098910223728720> Packages Terms of Service"),
+            ui.TextDisplay(f"## {Emojis.regulations} Packages Terms of Service"),
             ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
             ui.TextDisplay(
                 "**No-Refund Policy**\n"
@@ -222,7 +221,7 @@ class GetHelp(ui.Button[Any]):
         super().__init__(
             label="Get Support",
             style=discord.ButtonStyle.primary,
-            emoji=discord.PartialEmoji(name="support", id=1556395385730367488),
+            emoji=partial_emoji(Emojis.support),
             custom_id="support:gethelp",
         )
 
@@ -241,12 +240,12 @@ class DashboardMenu(ui.Select[Any]):
                 discord.SelectOption(
                     label="Discord Regulations",
                     value="discord_regulations",
-                    emoji=discord.PartialEmoji(name="regulations", id=1556098910223728720),
+                    emoji=partial_emoji(Emojis.regulations),
                 ),
                 discord.SelectOption(
                     label="Package ToS",
                     value="package_tos",
-                    emoji=discord.PartialEmoji(name="package", id=1551256156343636040),
+                    emoji=partial_emoji(Emojis.package),
                 ),
             ],
         )
@@ -272,7 +271,7 @@ class Dashboard(AspectLayout):
                 ui.MediaGallery(discord.MediaGalleryItem(DASHBOARD_BANNER)),
                 ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 ui.TextDisplay(
-                    "<:aspect:1553939826103947314> **Aspect Network** is the upcoming, biggest "
+                    f"{Emojis.aspect} **Aspect Network** is the upcoming, biggest "
                     "and purest network. From it's fresh branding to incredible hard working "
                     "staff, we do our best to connect server owners with the right people to "
                     "help their servers grow. Here at Aspect Network we want young and new "
@@ -459,7 +458,7 @@ class Tickets(commands.Cog):
             await self.ensure_dashboard()
 
     def is_staff(self, member: discord.Member) -> bool:
-        role_id = self.bot.settings.ticket_support_role_id
+        role_id = Roles.ticket_support
         return member.guild_permissions.manage_channels or (
             role_id is not None and member.get_role(role_id) is not None
         )
@@ -560,7 +559,7 @@ class Tickets(commands.Cog):
         if ticket.claimed_by != ctx.author.id and not ctx.author.guild_permissions.manage_guild:
             await ctx.warn("You did not claim this ticket.")
             return
-        role_id = self.bot.settings.ticket_support_role_id
+        role_id = Roles.ticket_support
         role = ctx.guild.get_role(role_id) if role_id else None
         if role is not None:
             await ctx.channel.set_permissions(
@@ -666,15 +665,14 @@ class Tickets(commands.Cog):
         reason: str,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
-        settings = self.bot.settings
         try:
             db = database(self.bot)
         except DatabaseUnavailable as exc:
             await report_interaction(interaction, exc, where="Database")
             return
         if (
-            settings.ticket_support_role_id is None
-            or settings.ticket_logs_channel_id is None
+            Roles.ticket_support is None
+            or Channels.ticket_logs is None
             or interaction.guild is None
             or not isinstance(interaction.user, discord.Member)
         ):
@@ -689,8 +687,8 @@ class Tickets(commands.Cog):
                 ephemeral=True,
             )
             return
-        category = interaction.guild.get_channel(CATEGORY)
-        support = interaction.guild.get_role(settings.ticket_support_role_id)
+        category = interaction.guild.get_channel(Channels.tickets_category)
+        support = interaction.guild.get_role(Roles.ticket_support)
         me = interaction.guild.me
         if not isinstance(category, discord.CategoryChannel) or support is None or me is None:
             await interaction.followup.send(
@@ -836,7 +834,7 @@ class Tickets(commands.Cog):
         if ticket.claimed_by is not None:
             await reply.warn("This ticket is already claimed.")
             return
-        role_id = self.bot.settings.ticket_support_role_id
+        role_id = Roles.ticket_support
         role = channel.guild.get_role(role_id) if role_id else None
         if role is not None:
             await channel.set_permissions(
@@ -878,13 +876,13 @@ class Tickets(commands.Cog):
             try:
                 url = await self.bot.cookie.transcript(
                     channel.id,
-                    self.bot.settings.discord_token.get_secret_value(),
+                    Secrets.discord_token,
                     title=f"Ticket #{ticket.number:03d}",
                     description=f"{ticket.kind}: {ticket.reason[:200]}",
                 )
             except CookieError as exc:
                 logger.warning("Ticket transcript failed status=%s", exc.status)
-        logs = guild.get_channel(self.bot.settings.ticket_logs_channel_id or 0)
+        logs = guild.get_channel(Channels.ticket_logs or 0)
         owner = guild.get_member(ticket.owner_id)
         closer = guild.get_member(closed_by)
         if isinstance(logs, discord.TextChannel):
@@ -922,10 +920,10 @@ class Tickets(commands.Cog):
 
     async def ensure_dashboard(self) -> None:
         async with self.bot.lock_for("ticket-dashboard"):
-            channel = self.bot.get_channel(DASHBOARD)
+            channel = self.bot.get_channel(Channels.dashboard)
             if channel is None:
                 try:
-                    channel = await self.bot.fetch_channel(DASHBOARD)
+                    channel = await self.bot.fetch_channel(Channels.dashboard)
                 except discord.HTTPException:
                     return
             if not isinstance(channel, discord.TextChannel) or self.bot.user is None:

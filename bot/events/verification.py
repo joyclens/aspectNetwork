@@ -10,6 +10,7 @@ import discord
 from discord.ext import commands
 
 from bot.core.bot import Aspect
+from bot.core.ids import Channels, Emojis, Guild, Roles
 from bot.services.dock import DockError, SessionCreated
 from bot.services.roblox import RobloxError
 from bot.shared.errors import remember_error, report_interaction
@@ -176,12 +177,12 @@ class Verification(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
-        if guild.id == self.bot.settings.discord_guild_id:
+        if guild.id == Guild.id:
             await self._panel()
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
-        if payload.channel_id != 1559306245901389907 or payload.message_id != self._panel_id:
+        if payload.channel_id != Channels.verify or payload.message_id != self._panel_id:
             return
         self._panel_id = None
         await self._panel()
@@ -207,11 +208,11 @@ class Verification(commands.Cog):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
         guild_id = interaction.guild_id
-        if not isinstance(guild_id, int) or guild_id != self.bot.settings.discord_guild_id:
+        if not isinstance(guild_id, int) or guild_id != Guild.id:
             logger.warning(
                 "Verification button used in guild %s, expected %s",
                 guild_id,
-                self.bot.settings.discord_guild_id,
+                Guild.id,
             )
             await interaction.followup.send(
                 view=container_view(
@@ -261,10 +262,10 @@ class Verification(commands.Cog):
 
     async def _panel(self) -> None:
         async with self.bot.lock_for("verification-panel"):
-            channel = self.bot.get_channel(1559306245901389907)
+            channel = self.bot.get_channel(Channels.verify)
             if channel is None:
                 try:
-                    channel = await self.bot.fetch_channel(1559306245901389907)
+                    channel = await self.bot.fetch_channel(Channels.verify)
                 except discord.HTTPException:
                     logger.warning("Verification channel is unavailable")
                     return
@@ -338,11 +339,11 @@ class Verification(commands.Cog):
         username: str,
         emoji: str,
     ) -> None:
-        if interaction.guild_id != self.bot.settings.discord_guild_id:
+        if interaction.guild_id != Guild.id:
             logger.warning(
                 "Verification continue used in guild %s, expected %s",
                 interaction.guild_id,
-                self.bot.settings.discord_guild_id,
+                Guild.id,
             )
             notice = container_view(
                 discord.ui.TextDisplay(
@@ -492,7 +493,7 @@ class Verification(commands.Cog):
         view.add_item(
             discord.ui.Container(
                 discord.ui.TextDisplay(
-                    f"{self.bot.settings.emojis.approve} **Verification Successful!**\n"
+                    f"{Emojis.approve} **Verification Successful!**\n"
                     "-# You have been successfully verified under "
                     f"[**{username}**]({profile}){shot}"
                 ),
@@ -509,7 +510,7 @@ class Verification(commands.Cog):
         return view
 
     async def _grant(self, member: discord.Member) -> None:
-        role_id = self.bot.settings.verified_role_id
+        role_id = Roles.verified
         if role_id is None:
             logger.info("Verification finished with no role configured")
             return

@@ -4,23 +4,22 @@ import asyncio
 import sys
 from contextlib import suppress
 
-from dotenv import load_dotenv
 from pydantic import ValidationError
 
 from bot.core.bot import Aspect
-from bot.core.config import Settings
+from bot.core.config import Settings, load_settings
+from bot.core.ids import Secrets
 from bot.core.logging import setup_logging
 
 
 async def run(settings: Settings) -> None:
     async with Aspect(settings) as bot:
-        await bot.start(settings.discord_token.get_secret_value())
+        await bot.start(Secrets.discord_token)
 
 
 def main() -> None:
-    load_dotenv()
     try:
-        settings = Settings()
+        settings = load_settings()
     except ValidationError:
         print("Invalid configuration.", file=sys.stderr)
         raise SystemExit(1) from None

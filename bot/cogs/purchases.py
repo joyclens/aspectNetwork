@@ -10,6 +10,7 @@ from discord import app_commands, ui
 from discord.ext import commands, tasks
 
 from bot.core.bot import Aspect
+from bot.core.ids import App, Channels, Emojis, Guild
 from bot.services.dock import DockError
 from bot.services.roblox import RobloxError, Sale
 from bot.shared.checks import database
@@ -80,7 +81,7 @@ class History(AspectLayout):
         pages = (len(self.sales) + 4) // 5 if len(self.sales) > 5 else 1
         chunk = self.sales[self.page * 5 : self.page * 5 + 5] if pages > 1 else self.sales
         lines = [
-            "## <:marketplace:1551256187301797970> Purchase History",
+            f"## {Emojis.marketplace} Purchase History",
             f"Purchases by [**{chunk[0].agent_name}**]"
             f"(https://www.roblox.com/users/{chunk[0].agent_id}/profile).",
             "",
@@ -149,7 +150,7 @@ class Purchases(commands.Cog):
     async def purchases(self, ctx: commands.Context[Any]) -> None:
         """Show the most recent store purchase."""
         ctx = require_context(ctx)
-        sale = await database(self.bot).recent_sale(self.bot.settings.roblox_group_id)
+        sale = await database(self.bot).recent_sale(App.roblox_group_id)
         if sale is None:
             await ctx.warn(
                 "I was **unable** to find the most recent purchase, "
@@ -174,7 +175,7 @@ class Purchases(commands.Cog):
         view.add_item(
             ui.Container(
                 ui.TextDisplay(
-                    "## <:marketplace:1551256187301797970> New Purchase\n"
+                    f"## {Emojis.marketplace} New Purchase\n"
                     f"[**{sale.agent_name}**]({profile}) has purchased an **item** from our store."
                 ),
                 ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
@@ -207,7 +208,7 @@ class Purchases(commands.Cog):
         try:
             linked = await self.bot.dock.linked_roblox(
                 user.id,
-                ctx.guild.id if ctx.guild else self.bot.settings.discord_guild_id,
+                ctx.guild.id if ctx.guild else Guild.id,
             )
         except DockError:
             logger.warning("Dock lookup failed for purchase history user=%s", user.id)
@@ -216,7 +217,7 @@ class Purchases(commands.Cog):
         if linked is None:
             await ctx.warn("That member is **not** verified.")
             return
-        sales = await db.agent_sales(self.bot.settings.roblox_group_id, int(linked))
+        sales = await db.agent_sales(App.roblox_group_id, int(linked))
         if not sales:
             await ctx.warn("I was **unable** to find any purchases for that member.")
             return
@@ -226,7 +227,7 @@ class Purchases(commands.Cog):
     async def highest(self, ctx: commands.Context[Any]) -> None:
         """Show the highest store purchase."""
         ctx = require_context(ctx)
-        sale = await database(self.bot).highest_sale(self.bot.settings.roblox_group_id)
+        sale = await database(self.bot).highest_sale(App.roblox_group_id)
         if sale is None:
             await ctx.warn(
                 "I was **unable** to find the highest purchase, "
@@ -251,7 +252,7 @@ class Purchases(commands.Cog):
         view.add_item(
             ui.Container(
                 ui.TextDisplay(
-                    "## <:marketplace:1551256187301797970> New Purchase\n"
+                    f"## {Emojis.marketplace} New Purchase\n"
                     f"[**{sale.agent_name}**]({profile}) has purchased an **item** from our store."
                 ),
                 ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
@@ -287,7 +288,7 @@ class Purchases(commands.Cog):
             return
         start, end = bounds
         count, total = await database(self.bot).sales_summary(
-            self.bot.settings.roblox_group_id,
+            App.roblox_group_id,
             start,
             end,
         )
@@ -295,7 +296,7 @@ class Purchases(commands.Cog):
         view.add_item(
             ui.Container(
                 ui.TextDisplay(
-                    f"## <:marketplace:1551256187301797970> Purchase Stats\nStats for **{choice}**."
+                    f"## {Emojis.marketplace} Purchase Stats\nStats for **{choice}**."
                 ),
                 ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
                 ui.TextDisplay(
@@ -334,7 +335,7 @@ class Purchases(commands.Cog):
         now = time.monotonic()
         if now < self._roblox_skip_until:
             return
-        group = self.bot.settings.roblox_group_id
+        group = App.roblox_group_id
         try:
             if await db.setting(f"purchases:{group}:seeded") is not True:
                 cursor = await db.setting(f"purchases:{group}:cursor")
@@ -364,9 +365,9 @@ class Purchases(commands.Cog):
             if not found:
                 return
 
-            channel = self.bot.get_channel(1529142741110358027)
+            channel = self.bot.get_channel(Channels.marketplace)
             if channel is None:
-                channel = await self.bot.fetch_channel(1529142741110358027)
+                channel = await self.bot.fetch_channel(Channels.marketplace)
             if not isinstance(channel, discord.TextChannel):
                 return
             funds, _ = await roblox.balance()
@@ -389,7 +390,7 @@ class Purchases(commands.Cog):
                 view.add_item(
                     ui.Container(
                         ui.TextDisplay(
-                            "## <:marketplace:1551256187301797970> New Purchase\n"
+                            f"## {Emojis.marketplace} New Purchase\n"
                             f"[**{sale.agent_name}**]({profile}) has purchased an **item** "
                             "from our store."
                         ),
