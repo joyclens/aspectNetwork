@@ -5,7 +5,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any, TypeVar
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -162,13 +162,14 @@ def _positive(value: int | None) -> int | None:
 
 
 def normalize_cookie(cookie: str) -> str:
-    """Keep the full .ROBLOSECURITY value, including the WARNING prefix."""
     raw = cookie.strip().strip('"').strip("'")
     for prefix in (".ROBLOSECURITY=", "ROBLOSECURITY="):
         if raw.upper().startswith(prefix.upper()):
             raw = raw[len(prefix) :].strip()
             break
-    return raw
+    if "%" in raw:
+        raw = unquote(raw)
+    return raw.strip()
 
 
 def _stable_sale_id(api_id: int, row: dict[str, Any]) -> int | None:
@@ -366,7 +367,14 @@ class Roblox:
         session = self._session
         if session is None or session.closed:
             raise RobloxError(0)
-        headers = {"Cookie": f".ROBLOSECURITY={self._cookie}"}
+        headers = {
+            "Cookie": f".ROBLOSECURITY={self._cookie}",
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+        }
         if self._csrf is not None:
             headers["X-CSRF-TOKEN"] = self._csrf
         for attempt in range(3):

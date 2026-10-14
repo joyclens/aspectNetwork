@@ -116,8 +116,8 @@ class Aspect(commands.Bot):
         self.session = session(timeout=40)
         self.db, self.db_version = await connect(Secrets.postgres_dsn)
         self.roblox = Roblox(
-            Secrets.roblox_cookie,
-            App.roblox_group_id,
+            self.settings.roblox_cookie.get_secret_value(),
+            self.settings.roblox_group_id,
             self.session,
         )
         await self.roblox.start()
@@ -230,7 +230,14 @@ class Aspect(commands.Bot):
         try:
             account = await self.roblox.authenticated()
         except RobloxError as exc:
-            logger.error("Roblox authentication failed status=%s", exc.status)
+            if exc.status == 401:
+                logger.error(
+                    "Roblox cookie was rejected (401). Set a fresh .ROBLOSECURITY value "
+                    "in ROBLOX_COOKIE or Secrets.roblox_cookie. The Open Cloud API key "
+                    "is separate and does not authenticate this cookie session."
+                )
+            else:
+                logger.error("Roblox authentication failed status=%s", exc.status)
             return
         logger.info("Roblox session ready for %s", account.name)
 
