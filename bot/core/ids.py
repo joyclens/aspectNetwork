@@ -46,7 +46,7 @@ class Channels:
     tickets_category: Final[int] = 1559883202930147451
     welcome: Final[int] = 1559284772507877508
     verify: Final[int] = 1559306245901389907
-    marketplace: Final[int] = 1559883352050368574
+    marketplace: Final[int] = 1559893992106233866
     ticket_logs: Final[int] = 1559883403996823552
 
 
