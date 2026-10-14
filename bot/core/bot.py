@@ -69,6 +69,8 @@ class Aspect(commands.Bot):
         self.roblox: Roblox | None = None
         self.dock: Dock | None = None
         self.cookie: Cookie | None = None
+        self.roblox_name: str | None = None
+        self.roblox_id: int | None = None
         self.db_version = ""
         self._locks: dict[str, asyncio.Lock] = {}
         self.traceback: dict[str, BaseException] = {}
@@ -230,6 +232,8 @@ class Aspect(commands.Bot):
         try:
             account = await self.roblox.authenticated()
         except RobloxError as exc:
+            self.roblox_name = None
+            self.roblox_id = None
             if exc.status == 401:
                 logger.error(
                     "Roblox cookie was rejected (401). Set a fresh .ROBLOSECURITY value "
@@ -239,7 +243,9 @@ class Aspect(commands.Bot):
             else:
                 logger.error("Roblox authentication failed status=%s", exc.status)
             return
-        logger.info("Roblox session ready for %s", account.name)
+        self.roblox_name = account.name
+        self.roblox_id = account.id
+        logger.info("Logged in to Roblox as %s (%s)", account.name, account.id)
 
     async def _start_dock(self) -> None:
         key = Secrets.dock_api_key

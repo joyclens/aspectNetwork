@@ -34,6 +34,10 @@ def _accent(colour: int) -> str:
 
 
 def print_banner(bot: Aspect) -> None:
+    if bot.roblox_name and bot.roblox_id:
+        roblox = f"{bot.roblox_name} ({bot.roblox_id})"
+    else:
+        roblox = "not authenticated"
     rendered = render_banner(
         {
             "accent": _accent(_ACCENT),
@@ -46,6 +50,7 @@ def print_banner(bot: Aspect) -> None:
             "cogs": str(len(bot.cogs)),
             "commands": str(len(set(bot.walk_commands()))),
             "db": bot.db_version,
+            "roblox": roblox,
         }
     )
     sys.stdout.buffer.write(rendered.encode("utf-8", errors="replace"))

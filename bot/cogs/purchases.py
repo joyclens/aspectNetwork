@@ -139,6 +139,11 @@ class Purchases(commands.Cog):
 
     async def cog_load(self) -> None:
         self.watch.start()
+        logger.info(
+            "Purchase watcher started (channel=%s, group=%s)",
+            Channels.purchase_logs,
+            App.roblox_group_id,
+        )
 
     async def cog_unload(self) -> None:
         self.watch.cancel()
@@ -332,6 +337,14 @@ class Purchases(commands.Cog):
         roblox, db = self.bot.roblox, self.bot.db
         if roblox is None or db is None:
             return
+        if self.bot.roblox_id is None:
+            now = time.monotonic()
+            if now >= self._roblox_log_at:
+                logger.warning(
+                    "Purchase logs waiting for a valid Roblox cookie session"
+                )
+                self._roblox_log_at = now + _ROBLOX_LOG_EVERY
+            return
         now = time.monotonic()
         if now < self._roblox_skip_until:
             return
@@ -344,10 +357,14 @@ class Purchases(commands.Cog):
                     page, cursor = await roblox.sales(cursor=cursor)
                     if page:
                         await db.store_sales(group, page)
+                        logger.info("Seeded %s purchase row(s)", len(page))
                     if cursor is None:
                         await db.store_setting(f"purchases:{group}:seeded", True)
                         await db.drop_setting(f"purchases:{group}:cursor")
-                        logger.info("Purchase history recorded")
+                        logger.info(
+                            "Purchase history seed complete for group %s",
+                            group,
+                        )
                         return
                     await db.store_setting(f"purchases:{group}:cursor", cursor)
                 return
@@ -367,10 +384,22 @@ class Purchases(commands.Cog):
 
             channel = self.bot.get_channel(Channels.purchase_logs)
             if channel is None:
-                channel = await self.bot.fetch_channel(Channels.purchase_logs)
+                try:
+                    channel = await self.bot.fetch_channel(Channels.purchase_logs)
+                except discord.HTTPException:
+                    logger.warning(
+                        "Purchase log channel %s is unavailable",
+                        Channels.purchase_logs,
+                    )
+                    return
             if not isinstance(channel, discord.TextChannel):
+                logger.warning(
+                    "Purchase log channel %s is not a text channel",
+                    Channels.purchase_logs,
+                )
                 return
             funds, _ = await roblox.balance()
+            posted = 0
             for sale in list(reversed(found))[:20]:
                 name = sale.item_name.replace("`", "'")
                 if sale.item_id and sale.item_type == "GamePass":
@@ -413,17 +442,38 @@ class Purchases(commands.Cog):
                 )
                 await channel.send(view=view)
                 await db.store_sales(group, [sale])
+                posted += 1
+            logger.info(
+                "Logged %s new purchase(s) to #%s",
+                posted,
+                channel.name,
+            )
         except RobloxError as exc:
             self._roblox_skip_until = time.monotonic() + _ROBLOX_BACKOFF
             if time.monotonic() >= self._roblox_log_at:
-                logger.warning("Purchase history is unavailable status=%s", exc.status)
+                logger.warning(
+                    "Purchase history is unavailable status=%s (retry in %ss)",
+                    exc.status,
+                    int(_ROBLOX_BACKOFF),
+                )
                 self._roblox_log_at = time.monotonic() + _ROBLOX_LOG_EVERY
         except discord.HTTPException:
-            logger.warning("Could not log a purchase")
+            logger.warning("Could not log a purchase to Discord")
 
     @watch.before_loop
     async def before_watch(self) -> None:
         await self.bot.wait_until_ready()
+        if self.bot.roblox_name and self.bot.roblox_id:
+            logger.info(
+                "Purchase watcher ready as %s (%s) -> channel %s",
+                self.bot.roblox_name,
+                self.bot.roblox_id,
+                Channels.purchase_logs,
+            )
+        else:
+            logger.warning(
+                "Purchase watcher ready, but Roblox is not authenticated yet"
+            )
 
 
 async def setup(bot: Aspect) -> None:
