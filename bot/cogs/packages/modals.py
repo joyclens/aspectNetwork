@@ -16,8 +16,7 @@ from bot.cogs.packages.models import (
 )
 from bot.cogs.packages.views import (
     _service,
-    draft_summary,
-    format_draft_lines,
+    publish_draft,
     purchase_pending_view,
 )
 from bot.core.bot import Aspect
@@ -76,10 +75,7 @@ class DetailsModal(ui.Modal, title="Package Details"):
         draft.title = str(title_input.value).strip()
         draft.price = price
         draft.touch()
-        await interaction.response.send_message(
-            view=draft_summary(self.user_id, 1, format_draft_lines(draft, 1)),
-            ephemeral=True,
-        )
+        await publish_draft(interaction, self.user_id, 1)
 
 
 class MetaModal(ui.Modal, title="Package Meta"):
@@ -137,10 +133,7 @@ class MetaModal(ui.Modal, title="Package Meta"):
         draft.sell_type = validate_sell_type(sell.values[0] if sell.values else "")
         draft.customizable = validate_bool_select(custom.values[0] if custom.values else "")
         draft.touch()
-        await interaction.response.send_message(
-            view=draft_summary(self.user_id, 2, format_draft_lines(draft, 2)),
-            ephemeral=True,
-        )
+        await publish_draft(interaction, self.user_id, 2)
 
 
 class FilesModal(ui.Modal, title="Package Files"):
@@ -169,20 +162,17 @@ class FilesModal(ui.Modal, title="Package Files"):
         assert isinstance(files_upload, ui.FileUpload)
         showcases = list(showcase_upload.values)
         packages = list(files_upload.values)
-        errors: list[str] = []
-        if len(showcases) != 1:
-            errors.append("Showcase must be exactly one file.")
-        else:
+        if len(showcases) == 1:
             attachment = showcases[0]
             content = (attachment.content_type or "").lower()
-            if content not in SHOWCASE_TYPES:
-                errors.append("Showcase must be an image or video.")
-            else:
+            if content in SHOWCASE_TYPES:
                 data = await attachment.read()
                 draft.showcase = StoredFile(attachment.filename, content, data)
-        if not (1 <= len(packages) <= 10):
-            errors.append("Provide between 1 and 10 package files.")
+            else:
+                draft.showcase = None
         else:
+            draft.showcase = None
+        if 1 <= len(packages) <= 10:
             stored: list[StoredFile] = []
             for attachment in packages:
                 data = await attachment.read()
@@ -194,14 +184,10 @@ class FilesModal(ui.Modal, title="Package Files"):
                     )
                 )
             draft.files = stored
+        else:
+            draft.files = []
         draft.touch()
-        lines = format_draft_lines(draft, 3)
-        if errors:
-            lines.extend(f"- {error}" for error in errors)
-        await interaction.response.send_message(
-            view=draft_summary(self.user_id, 3, lines),
-            ephemeral=True,
-        )
+        await publish_draft(interaction, self.user_id, 3)
 
 
 class DenyModal(ui.Modal, title="Deny Package"):

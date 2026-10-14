@@ -73,14 +73,22 @@ class Packages(commands.Cog):
                 ephemeral=True,
             )
             return
-        if not self.service.is_packager(interaction.user):
+        member = interaction.user
+        if interaction.guild is not None:
+            cached = interaction.guild.get_member(interaction.user.id)
+            if cached is not None:
+                member = cached
+        if not self.service.can_submit(member):
+            # Single response only — never open the modal when denied.
             await interaction.response.send_message(
                 view=container_view(discord.ui.TextDisplay("Packager role required.")),
                 ephemeral=True,
             )
             return
-        self.service.draft_for(interaction.user.id)
-        await interaction.response.send_modal(DetailsModal(interaction.user.id))
+        if interaction.response.is_done():
+            return
+        self.service.draft_for(member.id)
+        await interaction.response.send_modal(DetailsModal(member.id))
 
     @package.command(name="earnings", description="View your package earnings")
     async def earnings(self, interaction: discord.Interaction[Any]) -> None:

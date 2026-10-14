@@ -59,6 +59,8 @@ def reviewer_message(error: GamePassError) -> str:
         return "Roblox denied access. Check the Open Cloud API key scopes."
     if error.status == 409:
         return "Roblox reported a conflict creating or updating this game pass."
+    if error.status == 415:
+        return "Roblox rejected the request body (unsupported media type)."
     if error.status == 429:
         wait = f" Retry after {error.retry_after:.0f}s." if error.retry_after else ""
         return f"Roblox rate-limited the request.{wait}"
@@ -90,7 +92,8 @@ class GamePassClient:
         await self._session.close()
 
     async def create_pass(self, *, name: str, description: str, price: int) -> int:
-        form = aiohttp.FormData()
+        # Text-only FormData defaults to urlencoded; Roblox requires multipart (415 otherwise).
+        form = aiohttp.FormData(default_to_multipart=True)
         form.add_field("name", name[:50])
         form.add_field("description", description[:1000])
         form.add_field("price", str(price))
@@ -144,7 +147,7 @@ class GamePassClient:
         )
 
     async def close_sale(self, game_pass_id: int) -> None:
-        form = aiohttp.FormData()
+        form = aiohttp.FormData(default_to_multipart=True)
         form.add_field("isForSale", "false")
         await self._request(
             "PATCH",

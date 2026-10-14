@@ -5,21 +5,37 @@ from typing import Any
 import discord
 from discord import ui
 
-from bot.cogs.packages.constants import PACKAGE_BANNER_URL, SELL_LABELS, VIDEO_TYPES
+from bot.cogs.packages.constants import IMAGE_TYPES, PACKAGE_BANNER_URL, SELL_LABELS
 from bot.core.database import Package
 from bot.shared.layout import AspectLayout
 
 
-def _showcase_item(
-    filename: str,
-    *,
-    content_type: str | None = None,
-    url: str | None = None,
-) -> ui.Item[Any]:
-    media = url or f"attachment://{filename}"
-    if content_type and content_type.lower() in VIDEO_TYPES:
-        return ui.File(media)
-    return ui.MediaGallery(discord.MediaGalleryItem(media))
+def _is_image(content_type: str | None, filename: str) -> bool:
+    lowered = (content_type or "").lower()
+    if lowered in IMAGE_TYPES:
+        return True
+    if lowered:
+        return False
+    return filename.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
+
+
+def media_components(
+    entries: list[tuple[str, str | None]],
+) -> list[ui.Item[Any]]:
+    """Build MediaGallery (images) + File (video/other) from media URL/attachment refs."""
+    gallery: list[discord.MediaGalleryItem] = []
+    files: list[ui.File[Any]] = []
+    for media, content_type in entries:
+        name = media.rsplit("/", 1)[-1].split("?", 1)[0]
+        if _is_image(content_type, name):
+            gallery.append(discord.MediaGalleryItem(media))
+        else:
+            files.append(ui.File(media))
+    items: list[ui.Item[Any]] = []
+    if gallery:
+        items.append(ui.MediaGallery(*gallery[:10]))
+    items.extend(files[:10])
+    return items
 
 
 def _banner() -> ui.MediaGallery[Any]:
@@ -29,7 +45,8 @@ def _banner() -> ui.MediaGallery[Any]:
 def submission_layout(
     package: Package,
     *,
-    showcase_filename: str,
+    media: list[tuple[str, str | None]] | None = None,
+    showcase_filename: str | None = None,
     showcase_content_type: str | None = None,
     status_line: str | None = None,
     buttons: list[ui.Item[Any]] | None = None,
@@ -53,9 +70,13 @@ def submission_layout(
             f"```\n{description}\n```"
         ),
         ui.Separator(),
-        _showcase_item(showcase_filename, content_type=showcase_content_type),
-        ui.Separator(),
     ]
+    resolved = media
+    if resolved is None and showcase_filename:
+        resolved = [(f"attachment://{showcase_filename}", showcase_content_type)]
+    if resolved:
+        items.extend(media_components(resolved))
+        items.append(ui.Separator())
     if buttons:
         items.append(ui.ActionRow(*buttons))
     if status_line:
@@ -69,7 +90,8 @@ def submission_layout(
 def forum_layout(
     package: Package,
     *,
-    showcase_filename: str,
+    media: list[tuple[str, str | None]] | None = None,
+    showcase_filename: str | None = None,
     showcase_content_type: str | None = None,
     status_line: str | None = None,
     buttons: list[ui.Item[Any]] | None = None,
@@ -87,9 +109,13 @@ def forum_layout(
             f"**Customizable:** `{package.customizable}`"
         ),
         ui.Separator(),
-        _showcase_item(showcase_filename, content_type=showcase_content_type),
-        ui.Separator(),
     ]
+    resolved = media
+    if resolved is None and showcase_filename:
+        resolved = [(f"attachment://{showcase_filename}", showcase_content_type)]
+    if resolved:
+        items.extend(media_components(resolved))
+        items.append(ui.Separator())
     if buttons:
         items.append(ui.ActionRow(*buttons))
     if status_line:
@@ -117,4 +143,25 @@ def report_layout(package: Package, reporter_id: int, issue: str, jump_url: str)
             _banner(),
         )
     )
+    return view
+
+
+def draft_layout(
+    user_id: int,
+    step: int,
+    lines: list[str],
+    *,
+    media: list[tuple[str, str | None]] | None = None,
+    buttons: list[ui.Item[Any]],
+) -> AspectLayout:
+    items: list[ui.Item[Any]] = [
+        ui.TextDisplay(f"## Package Draft · Step {step}/3\n" + "\n".join(lines)),
+    ]
+    if media:
+        items.append(ui.Separator())
+        items.extend(media_components(media))
+    items.append(ui.Separator())
+    items.append(ui.ActionRow(*buttons))
+    view = AspectLayout(timeout=900)
+    view.add_item(ui.Container(*items))
     return view
