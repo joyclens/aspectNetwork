@@ -5,7 +5,8 @@ from typing import Any
 import discord
 from discord import ui
 
-from bot.cogs.packages.constants import PACKAGE_TYPES, SHOWCASE_TYPES
+from bot.cogs.packages.constants import PACKAGE_TYPES
+from bot.cogs.packages.media import is_showcase_type
 from bot.cogs.packages.models import (
     StoredFile,
     neutralise_fences,
@@ -141,11 +142,11 @@ class FilesModal(ui.Modal, title="Package Files"):
         super().__init__()
         self.user_id = user_id
         self.showcase: ui.Label[Any] = ui.Label(
-            text="Package Showcase",
-            component=ui.FileUpload(min_values=1, max_values=1, required=True),
+            text="Showcase (images/videos)",
+            component=ui.FileUpload(min_values=1, max_values=10, required=True),
         )
         self.files: ui.Label[Any] = ui.Label(
-            text="Package Files",
+            text="Package files (.zip, .psd, …)",
             component=ui.FileUpload(min_values=1, max_values=10, required=True),
         )
         self.add_item(self.showcase)
@@ -162,30 +163,29 @@ class FilesModal(ui.Modal, title="Package Files"):
         assert isinstance(files_upload, ui.FileUpload)
         showcases = list(showcase_upload.values)
         packages = list(files_upload.values)
-        if len(showcases) == 1:
-            attachment = showcases[0]
+        stored_showcases: list[StoredFile] = []
+        for attachment in showcases[:10]:
             content = (attachment.content_type or "").lower()
-            if content in SHOWCASE_TYPES:
-                data = await attachment.read()
-                draft.showcase = StoredFile(attachment.filename, content, data)
-            else:
-                draft.showcase = None
-        else:
-            draft.showcase = None
-        if 1 <= len(packages) <= 10:
-            stored: list[StoredFile] = []
-            for attachment in packages:
-                data = await attachment.read()
-                stored.append(
-                    StoredFile(
-                        attachment.filename,
-                        (attachment.content_type or "application/octet-stream").lower(),
-                        data,
-                    )
+            if not is_showcase_type(content, attachment.filename):
+                continue
+            data = await attachment.read()
+            stored_showcases.append(
+                StoredFile(attachment.filename, content or "application/octet-stream", data)
+            )
+        draft.showcases = stored_showcases
+        stored_packages: list[StoredFile] = []
+        for attachment in packages[:10]:
+            data = await attachment.read()
+            if not data:
+                continue
+            stored_packages.append(
+                StoredFile(
+                    attachment.filename,
+                    (attachment.content_type or "application/octet-stream").lower(),
+                    data,
                 )
-            draft.files = stored
-        else:
-            draft.files = []
+            )
+        draft.files = stored_packages
         draft.touch()
         await publish_draft(interaction, self.user_id, 3)
 

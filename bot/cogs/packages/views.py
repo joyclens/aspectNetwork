@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import re
 import time
 from typing import Any
@@ -18,14 +17,13 @@ from bot.cogs.packages.constants import (
     SELL_LABELS,
 )
 from bot.cogs.packages.layouts import draft_layout
+from bot.cogs.packages.media import discord_files_and_media
 from bot.cogs.packages.models import PackageDraft, draft_errors
 from bot.core.bot import Aspect
 from bot.shared.errors import report_interaction
 from bot.shared.layout import container_view
 
 Interaction = discord.Interaction[Any]
-
-_MAX_DRAFT_ATTACHMENTS = 10
 
 
 def _service(interaction: Interaction) -> Any:
@@ -36,53 +34,28 @@ def _service(interaction: Interaction) -> Any:
     return getattr(cog, "service", None) if cog is not None else None
 
 
-def _unique_name(filename: str, used: set[str]) -> str:
-    if filename not in used:
-        used.add(filename)
-        return filename
-    stem, dot, suffix = filename.rpartition(".")
-    base = stem if dot else filename
-    ext = f".{suffix}" if dot else ""
-    index = 2
-    while True:
-        candidate = f"{base}_{index}{ext}"
-        if candidate not in used:
-            used.add(candidate)
-            return candidate
-        index += 1
-
-
-def draft_attachment_bundle(
+def build_draft_view(
+    user_id: int,
+    step: int,
     draft: PackageDraft,
-) -> tuple[list[discord.File], list[tuple[str, str | None]]]:
-    files: list[discord.File] = []
-    media: list[tuple[str, str | None]] = []
-    used: set[str] = set()
-    if draft.showcase is not None:
-        name = _unique_name(draft.showcase.filename, used)
-        files.append(discord.File(io.BytesIO(draft.showcase.data), filename=name))
-        media.append((f"attachment://{name}", draft.showcase.content_type))
-    for item in draft.files:
-        if len(files) >= _MAX_DRAFT_ATTACHMENTS:
-            break
-        name = _unique_name(item.filename, used)
-        files.append(discord.File(io.BytesIO(item.data), filename=name))
-        media.append((f"attachment://{name}", item.content_type))
-    return files, media
-
-
-def build_draft_view(user_id: int, step: int, draft: PackageDraft) -> tuple[
-    discord.ui.LayoutView,
-    list[discord.File],
-]:
+    *,
+    buttons: list[Any] | None = None,
+) -> tuple[discord.ui.LayoutView, list[discord.File]]:
     lines = format_draft_lines(draft, step)
-    files, media = draft_attachment_bundle(draft) if step >= 3 else ([], [])
+    files, media = (
+        discord_files_and_media(draft.showcases, draft.files)
+        if step >= 3
+        else ([], [])
+    )
+    row = buttons
+    if row is None:
+        row = [DraftEdit(user_id, step), DraftContinue(user_id, step)]
     view = draft_layout(
         user_id,
         step,
         lines,
         media=media or None,
-        buttons=[DraftEdit(user_id, step), DraftContinue(user_id, step)],
+        buttons=row,
     )
     return view, files
 
@@ -93,13 +66,9 @@ async def publish_draft(interaction: Interaction, user_id: int, step: int) -> No
         return
     draft = service.draft_for(user_id)
     view, files = build_draft_view(user_id, step, draft)
-    # Modal opened from a draft button → edit that ephemeral in place.
-    # InteractionResponse.edit_message takes new Files via attachments=.
+    # Modal from a draft button → edit that ephemeral in place.
     if interaction.message is not None:
-        await interaction.response.edit_message(
-            view=view,
-            attachments=files,
-        )
+        await interaction.response.edit_message(view=view, attachments=files)
         return
     await interaction.response.send_message(
         view=view,
@@ -139,20 +108,50 @@ class DraftContinue(ui.Button[Any]):
         elif self.step == 2:
             await interaction.response.send_modal(FilesModal(self.user_id))
         else:
+            if not service.begin_submit(self.user_id):
+                await interaction.response.send_message(
+                    view=container_view(ui.TextDisplay("Already submitting this draft.")),
+                    ephemeral=True,
+                )
+                return
             await interaction.response.defer(ephemeral=True, thinking=True)
+            # Strip buttons immediately so Continue cannot be spammed.
+            if interaction.message is not None:
+                try:
+                    await interaction.message.edit(
+                        view=draft_layout(
+                            self.user_id,
+                            3,
+                            ["Submitting…"],
+                            media=None,
+                            buttons=None,
+                        ),
+                        attachments=interaction.message.attachments,
+                    )
+                except discord.HTTPException:
+                    pass
             try:
                 package = await service.submit_final(interaction, draft)
             except Exception as exc:
+                service.end_submit(self.user_id)
+                if interaction.message is not None:
+                    try:
+                        restore, files = build_draft_view(self.user_id, 3, draft)
+                        await interaction.message.edit(view=restore, attachments=files)
+                    except discord.HTTPException:
+                        pass
                 await report_interaction(interaction, exc, where="Package submit")
                 return
+            service.end_submit(self.user_id)
             done = container_view(
                 ui.TextDisplay(
-                    f"Submitted **{package.title}** for review (`{package.id}`)."
+                    f"## Submitted\n**{package.title}** is in review (`{package.id}`)."
                 )
             )
             if interaction.message is not None:
                 try:
                     await interaction.message.edit(view=done, attachments=[])
+                    return
                 except discord.HTTPException:
                     pass
             await interaction.followup.send(view=done, ephemeral=True)
@@ -536,10 +535,12 @@ def format_draft_lines(draft: Any, step: int) -> list[str]:
             lines.append(f"**Customizable:** `{draft.customizable}`")
         if draft.description:
             lines.append(f"**Description:**\n```\n{draft.description[:400]}\n```")
-    if step >= 3 and draft.files:
-        extra = len(draft.files) - max(0, _MAX_DRAFT_ATTACHMENTS - (1 if draft.showcase else 0))
-        if extra > 0:
-            lines.append(f"-# Showing first attachments · `{extra}` more on submit.")
+    if step >= 3:
+        total = len(draft.showcases) + len(draft.files)
+        if total > 10:
+            lines.append(
+                f"-# Preview shows 10 of `{total}` files · all are stored on submit."
+            )
     errors = draft_errors(draft, step=step)
     if errors:
         lines.append("")

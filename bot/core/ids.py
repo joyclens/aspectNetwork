@@ -66,7 +66,7 @@ class Channels:
     purchase_logs: Final[int] = 1559896562426060860
 
     package_submissions: Final[int] = 1560013999926411335
-    package_storage: Final[int] = 1560013999926411335
+    package_storage: Final[int] = 1560014006700478604
     package_forum_branding: Final[int] = 1560013923002880000
     package_forum_liveries: Final[int] = 1560013939763454113
     package_forum_clothing: Final[int] = 1560013962165362851

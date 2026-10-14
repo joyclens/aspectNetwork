@@ -32,8 +32,12 @@ class PackageDraft:
     description: str | None = None
     sell_type: str | None = None
     customizable: bool | None = None
-    showcase: StoredFile | None = None
+    showcases: list[StoredFile] = field(default_factory=list)
     files: list[StoredFile] = field(default_factory=list)
+
+    @property
+    def showcase(self) -> StoredFile | None:
+        return self.showcases[0] if self.showcases else None
 
     def expired(self, now: datetime | None = None) -> bool:
         moment = now or datetime.now(UTC)
@@ -111,10 +115,10 @@ def draft_errors(draft: PackageDraft, *, step: int) -> list[str]:
         if draft.customizable is None:
             errors.append("Customizable is required.")
     if step >= 3:
-        if draft.showcase is None:
-            errors.append("Showcase must be exactly one image or video.")
+        if not (1 <= len(draft.showcases) <= 10):
+            errors.append("Showcase must be 1–10 images or videos.")
         if not (1 <= len(draft.files) <= 10):
-            errors.append("Provide between 1 and 10 package files.")
+            errors.append("Provide between 1 and 10 package files (.zip, .psd, etc.).")
     return errors
 
 

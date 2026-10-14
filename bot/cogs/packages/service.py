@@ -21,6 +21,12 @@ from bot.cogs.packages.constants import (
     STATUS_SOLD,
 )
 from bot.cogs.packages.layouts import forum_layout, report_layout, submission_layout
+from bot.cogs.packages.media import (
+    first_image_showcase,
+    media_from_attachments,
+    parse_storage_ids,
+    safe_filename,
+)
 from bot.cogs.packages.models import (
     PackageDraft,
     StoredFile,
@@ -45,6 +51,16 @@ class PackageService:
         self.bot = bot
         self.drafts: dict[int, PackageDraft] = {}
         self._confirm_at: dict[int, float] = {}
+        self._submitting: set[int] = set()
+
+    def begin_submit(self, user_id: int) -> bool:
+        if user_id in self._submitting:
+            return False
+        self._submitting.add(user_id)
+        return True
+
+    def end_submit(self, user_id: int) -> None:
+        self._submitting.discard(user_id)
 
     def gamepass(self) -> GamePassClient | None:
         key = self.bot.settings.roblox_api_key
@@ -112,36 +128,52 @@ class PackageService:
             return None
         return int(linked)
 
-    async def store_files(self, draft: PackageDraft) -> tuple[int, int, str, discord.Message]:
+    async def store_files(
+        self,
+        draft: PackageDraft,
+    ) -> tuple[int, int, str, list[discord.Message]]:
         channel = await self.channel(Channels.package_storage)
         if not isinstance(channel, discord.TextChannel):
             raise RuntimeError("Package storage channel is unavailable.")
-        if draft.showcase is None or not draft.files:
+        if not draft.showcases or not draft.files:
             raise RuntimeError("Draft files are incomplete.")
-        files = [
-            discord.File(io.BytesIO(draft.showcase.data), filename=draft.showcase.filename),
-            *[
-                discord.File(io.BytesIO(item.data), filename=item.filename)
-                for item in draft.files
-            ],
-        ]
-        message = await channel.send(
-            content=f"package-storage:{draft.user_id}",
-            files=files,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
-        return channel.id, message.id, draft.showcase.filename, message
+        ordered: list[tuple[str, StoredFile]] = [
+            ("showcase_", item) for item in draft.showcases
+        ] + [("package_", item) for item in draft.files]
+        messages: list[discord.Message] = []
+        for start in range(0, len(ordered), 10):
+            window = ordered[start : start + 10]
+            files = [
+                discord.File(
+                    io.BytesIO(stored.data),
+                    filename=safe_filename(index, stored.filename, prefix=prefix),
+                )
+                for index, (prefix, stored) in enumerate(window)
+            ]
+            messages.append(
+                await channel.send(
+                    content=f"package-storage:{draft.user_id}:pending",
+                    files=files,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            )
+        ids = ",".join(str(message.id) for message in messages)
+        await messages[0].edit(content=f"package-storage:{draft.user_id}:{ids}")
+        icon = first_image_showcase(draft.showcases) or draft.showcases[0]
+        return channel.id, messages[0].id, icon.filename, messages
 
     async def submit_final(self, interaction: Interaction, draft: PackageDraft) -> Package:
         from bot.cogs.packages.views import ApproveButton, DenyButton
 
-        channel_id, message_id, showcase_name, _storage = await self.store_files(draft)
+        channel_id, message_id, showcase_name, storage_messages = await self.store_files(
+            draft
+        )
         submissions = await self.channel(Channels.package_submissions)
         if not isinstance(submissions, discord.TextChannel):
             raise RuntimeError("Package submissions channel is unavailable.")
         assert draft.package_type and draft.title and draft.price is not None
         assert draft.description and draft.sell_type is not None
-        assert draft.customizable is not None and draft.showcase is not None
+        assert draft.customizable is not None and draft.showcases
         db = database(self.bot)
         package = await db.create_package(
             packager_id=draft.user_id,
@@ -157,38 +189,19 @@ class PackageService:
             submission_message_id=0,
             showcase_filename=showcase_name,
         )
-        # Attach media on the submission itself so Components V2 gallery/files
-        # stay valid (storage CDN links expire). Cap at Discord's 10-file limit.
-        used: set[str] = set()
-        attach: list[discord.File] = []
+        # Use storage CDN URLs in MediaGallery/File — avoids attachment:// mismatch 50035.
         media: list[tuple[str, str | None]] = []
-
-        def _add(stored: StoredFile) -> None:
-            if len(attach) >= 10:
-                return
-            name = stored.filename
-            if name in used:
-                stem, dot, suffix = name.rpartition(".")
-                base = stem if dot else name
-                ext = f".{suffix}" if dot else ""
-                index = 2
-                while f"{base}_{index}{ext}" in used:
-                    index += 1
-                name = f"{base}_{index}{ext}"
-            used.add(name)
-            attach.append(discord.File(io.BytesIO(stored.data), filename=name))
-            media.append((f"attachment://{name}", stored.content_type))
-
-        _add(draft.showcase)
-        for item in draft.files:
-            _add(item)
+        for message in storage_messages:
+            media.extend(media_from_attachments(message.attachments))
         posted = await submissions.send(
             view=submission_layout(
                 package,
                 media=media,
-                buttons=[ApproveButton(package.id), DenyButton(package.id)],
+                buttons=[
+                    ApproveButton(package.id).item,
+                    DenyButton(package.id).item,
+                ],
             ),
-            files=attach,
             allowed_mentions=discord.AllowedMentions.none(),
         )
         await db.set_package_submission(package.id, posted.id)
@@ -216,28 +229,22 @@ class PackageService:
                 price=claimed.price,
             )
             icon_note = ""
-            storage_message = await self._storage_message(claimed)
-            showcase = None
-            showcase_bytes: bytes | None = None
-            content_type: str | None = None
-            media: list[tuple[str, str | None]] = []
-            if storage_message is not None:
-                showcase = next(
-                    (
-                        item
-                        for item in storage_message.attachments
-                        if item.filename == claimed.showcase_filename
-                    ),
-                    storage_message.attachments[0] if storage_message.attachments else None,
-                )
-            forum_files: list[discord.File] = []
+            storage_messages = await self._storage_messages(claimed)
+            storage_media = media_from_attachments(
+                [item for message in storage_messages for item in message.attachments]
+            )
+            showcase = self._pick_showcase_attachment(claimed, storage_messages)
+            forum_file: discord.File | None = None
+            forum_media: list[tuple[str, str | None]] = []
             if showcase is not None:
                 content_type = showcase.content_type
                 showcase_bytes = await showcase.read()
-                forum_files.append(
-                    discord.File(io.BytesIO(showcase_bytes), filename=showcase.filename)
+                uploaded = discord.File(
+                    io.BytesIO(showcase_bytes),
+                    filename=safe_filename(0, showcase.filename, prefix="showcase_"),
                 )
-                media = [(f"attachment://{showcase.filename}", content_type)]
+                forum_file = uploaded
+                forum_media = [(uploaded.uri, content_type)]
                 if content_type in IMAGE_TYPES:
                     try:
                         await client.upload_icon(gamepass_id, showcase_bytes)
@@ -253,13 +260,16 @@ class PackageService:
                 "name": claimed.title[:100],
                 "view": forum_layout(
                     claimed,
-                    media=media or None,
-                    buttons=[PurchaseButton(claimed.id), ReportButton(claimed.id)],
+                    media=forum_media or storage_media[:1] or None,
+                    buttons=[
+                        PurchaseButton(claimed.id).item,
+                        ReportButton(claimed.id).item,
+                    ],
                 ),
                 "allowed_mentions": discord.AllowedMentions.none(),
             }
-            if forum_files:
-                thread_kwargs["file"] = forum_files[0]
+            if forum_file is not None:
+                thread_kwargs["file"] = forum_file
             thread_with = await forum.create_thread(**thread_kwargs)
             accepted = await db.accept_package(
                 claimed.id,
@@ -272,17 +282,13 @@ class PackageService:
                 raise RuntimeError("Failed to mark package accepted.")
             status = f"-# Approved by <@{interaction.user.id}>{icon_note}"
             if interaction.message is not None:
-                kept = [
-                    (f"attachment://{item.filename}", item.content_type)
-                    for item in interaction.message.attachments
-                ]
                 await interaction.message.edit(
                     view=submission_layout(
                         accepted,
-                        media=kept or media or None,
+                        media=storage_media or None,
                         status_line=status,
+                        buttons=None,
                     ),
-                    attachments=interaction.message.attachments,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             await self._dm(
@@ -309,17 +315,20 @@ class PackageService:
             return "This package cannot be denied."
         status = f"-# Denied by <@{interaction.user.id}>: {reason}"
         if interaction.message is not None:
-            kept = [
-                (f"attachment://{item.filename}", item.content_type)
-                for item in interaction.message.attachments
-            ]
+            storage_media = media_from_attachments(
+                [
+                    item
+                    for message in await self._storage_messages(denied)
+                    for item in message.attachments
+                ]
+            )
             await interaction.message.edit(
                 view=submission_layout(
                     denied,
-                    media=kept or None,
+                    media=storage_media or None,
                     status_line=status,
+                    buttons=None,
                 ),
-                attachments=interaction.message.attachments,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         await self._dm(
@@ -477,15 +486,13 @@ class PackageService:
             if isinstance(thread, discord.Thread):
                 if sold.forum_message_id is not None:
                     message = await thread.fetch_message(sold.forum_message_id)
-                    kept = [
-                        (f"attachment://{item.filename}", item.content_type)
-                        for item in message.attachments
-                    ]
+                    kept = media_from_attachments(message.attachments)
                     await message.edit(
                         view=forum_layout(
                             sold,
                             media=kept or None,
                             status_line="-# Sold",
+                            buttons=None,
                         ),
                         attachments=message.attachments,
                         allowed_mentions=discord.AllowedMentions.none(),
@@ -548,40 +555,59 @@ class PackageService:
         except discord.HTTPException:
             return False
 
-    async def _storage_message(self, package: Package) -> discord.Message | None:
+    async def _storage_messages(self, package: Package) -> list[discord.Message]:
         if package.storage_channel_id is None or package.storage_message_id is None:
-            return None
+            return []
         channel = await self.channel(package.storage_channel_id)
         if not isinstance(channel, discord.TextChannel):
-            return None
+            return []
         try:
-            return await channel.fetch_message(package.storage_message_id)
+            first = await channel.fetch_message(package.storage_message_id)
         except discord.HTTPException:
-            return None
+            return []
+        ids = parse_storage_ids(first.content, first.id)
+        messages: list[discord.Message] = []
+        for message_id in ids:
+            if message_id == first.id:
+                messages.append(first)
+                continue
+            try:
+                messages.append(await channel.fetch_message(message_id))
+            except discord.HTTPException:
+                continue
+        return messages or [first]
 
-    async def _storage_attachment(
+    def _pick_showcase_attachment(
         self,
         package: Package,
-        filename: str,
+        messages: list[discord.Message],
     ) -> discord.Attachment | None:
-        message = await self._storage_message(package)
-        if message is None:
+        attachments = [item for message in messages for item in message.attachments]
+        if not attachments:
             return None
-        for attachment in message.attachments:
-            if attachment.filename == filename:
+        for attachment in attachments:
+            name = attachment.filename.lower()
+            if name.startswith("showcase_") or attachment.filename == package.showcase_filename:
+                content = (attachment.content_type or "").lower()
+                if content in IMAGE_TYPES or name.endswith(
+                    (".png", ".jpg", ".jpeg", ".gif", ".webp")
+                ):
+                    return attachment
+        for attachment in attachments:
+            if attachment.filename.startswith("showcase_"):
                 return attachment
-        return message.attachments[0] if message.attachments else None
+        return attachments[0]
 
     async def _storage_files(self, package: Package) -> list[discord.File]:
-        message = await self._storage_message(package)
-        if message is None:
-            return []
         files: list[discord.File] = []
-        for attachment in message.attachments:
-            if attachment.filename == package.showcase_filename:
-                continue
-            data = await attachment.read()
-            files.append(discord.File(io.BytesIO(data), filename=attachment.filename))
+        for message in await self._storage_messages(package):
+            for attachment in message.attachments:
+                if attachment.filename.startswith("showcase_"):
+                    continue
+                if attachment.filename == package.showcase_filename:
+                    continue
+                data = await attachment.read()
+                files.append(discord.File(io.BytesIO(data), filename=attachment.filename))
         return files
 
 

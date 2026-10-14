@@ -152,7 +152,7 @@ def draft_layout(
     lines: list[str],
     *,
     media: list[tuple[str, str | None]] | None = None,
-    buttons: list[ui.Item[Any]],
+    buttons: list[ui.Item[Any]] | None = None,
 ) -> AspectLayout:
     items: list[ui.Item[Any]] = [
         ui.TextDisplay(f"## Package Draft · Step {step}/3\n" + "\n".join(lines)),
@@ -160,8 +160,9 @@ def draft_layout(
     if media:
         items.append(ui.Separator())
         items.extend(media_components(media))
-    items.append(ui.Separator())
-    items.append(ui.ActionRow(*buttons))
+    if buttons:
+        items.append(ui.Separator())
+        items.append(ui.ActionRow(*buttons))
     view = AspectLayout(timeout=900)
     view.add_item(ui.Container(*items))
     return view
