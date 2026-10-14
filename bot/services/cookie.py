@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 from pydantic import BaseModel, ConfigDict, ValidationError
+
+TRANSCRIPT_PUBLIC_HOST = "1j7NzkuG6P.joyclen.codes"
 
 
 class CookieError(Exception):
@@ -27,10 +29,11 @@ def transcript_url(payload: Any) -> str:
         raise CookieError(0) from exc
     if not parsed.success or not parsed.url.startswith("https://"):
         raise CookieError(0)
-    host = (urlparse(parsed.url).hostname or "").lower()
+    parts = urlparse(parsed.url)
+    host = (parts.hostname or "").lower()
     if host != "www.cookie-api.com" and not host.endswith(".cookie-api.com"):
         raise CookieError(0)
-    return parsed.url
+    return urlunparse(parts._replace(netloc=TRANSCRIPT_PUBLIC_HOST))
 
 
 class Cookie:

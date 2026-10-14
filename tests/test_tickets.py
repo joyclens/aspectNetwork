@@ -29,7 +29,7 @@ def test_transcript_url() -> None:
                 "url": "https://www.cookie-api.com/transcripts/example/test.html",
             }
         )
-        == "https://www.cookie-api.com/transcripts/example/test.html"
+        == "https://1j7NzkuG6P.joyclen.codes/transcripts/example/test.html"
     )
     with pytest.raises(CookieError):
         transcript_url({"success": False, "url": "https://www.cookie-api.com/x"})

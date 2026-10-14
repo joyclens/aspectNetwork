@@ -197,6 +197,25 @@ class ClaimButton(ui.Button[Any]):
         await cog.claim_button(interaction)
 
 
+class UnclaimButton(ui.Button[Any]):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Unclaim",
+            style=discord.ButtonStyle.secondary,
+            custom_id="support:unclaim",
+        )
+
+    async def callback(self, interaction: discord.Interaction[Any]) -> None:
+        cog = tickets_cog(interaction)
+        if cog is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Tickets are unavailable.")),
+                ephemeral=True,
+            )
+            return
+        await cog.unclaim_button(interaction)
+
+
 class CloseButton(ui.Button[Any]):
     def __init__(self) -> None:
         super().__init__(
@@ -232,11 +251,18 @@ class EscalateButton(ui.Button[Any]):
         )
 
 
-def ticket_actions() -> ui.ActionRow:
-    return ui.ActionRow(ClaimButton(), CloseButton(), EscalateButton())
+def ticket_actions(*, claimed: bool = False) -> ui.ActionRow:
+    claim = UnclaimButton() if claimed else ClaimButton()
+    return ui.ActionRow(claim, CloseButton(), EscalateButton())
 
 
-def ticket_message(number: int, owner: discord.Member, reason: str) -> AspectLayout:
+def ticket_message(
+    number: int,
+    owner: discord.abc.User | discord.Member,
+    reason: str,
+    *,
+    claimed: bool = False,
+) -> AspectLayout:
     view = AspectLayout(timeout=None)
     view.add_item(
         ui.Container(
@@ -249,7 +275,7 @@ def ticket_message(number: int, owner: discord.Member, reason: str) -> AspectLay
                 f"# Inquiry:\n{reason}"
             ),
             ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
-            ticket_actions(),
+            ticket_actions(claimed=claimed),
             ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
             ui.MediaGallery(discord.MediaGalleryItem(TICKET_FOOTER)),
         )
@@ -257,9 +283,29 @@ def ticket_message(number: int, owner: discord.Member, reason: str) -> AspectLay
     return view
 
 
+def claim_notice(member: discord.Member) -> AspectLayout:
+    return container_view(
+        ui.TextDisplay(
+            f"## Ticket Claimed\n{member.mention} claimed this ticket."
+        )
+    )
+
+
+def unclaim_notice(member: discord.Member) -> AspectLayout:
+    return container_view(
+        ui.TextDisplay(
+            f"## Ticket Unclaimed\n{member.mention} unclaimed this ticket."
+        )
+    )
+
+
 def register_ticket_views(bot: Aspect) -> None:
     panel = AspectLayout(timeout=None)
-    panel.add_item(ui.Container(ticket_actions()))
+    panel.add_item(
+        ui.Container(
+            ui.ActionRow(ClaimButton(), UnclaimButton(), CloseButton(), EscalateButton())
+        )
+    )
     bot.add_view(panel)
 
 
@@ -478,7 +524,12 @@ class Tickets(commands.Cog):
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member):
             return
-        await self.claim_ticket(ctx.channel, ctx.author, reply=ctx)
+        panel = (
+            await self.find_ticket_panel(ctx.channel)
+            if isinstance(ctx.channel, discord.TextChannel)
+            else None
+        )
+        await self.claim_ticket(ctx.channel, ctx.author, reply=ctx, panel=panel)
 
     @ticket.command(name="add", description="Add a member to the current ticket.")  # type: ignore[arg-type]
     @app_commands.describe(user="Member to add")
@@ -542,38 +593,14 @@ class Tickets(commands.Cog):
     async def unclaim(self, ctx: commands.Context[Any]) -> None:
         """Unclaim the current support ticket."""
         ctx = require_context(ctx)
-        db = database(self.bot)
-        if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
-            await ctx.warn("You cannot manage tickets.")
+        if not isinstance(ctx.author, discord.Member):
             return
-        ticket = await self.require_ticket(ctx)
-        if ticket is None or not isinstance(ctx.channel, discord.TextChannel) or ctx.guild is None:
-            return
-        if ticket.claimed_by is None:
-            await ctx.warn("This ticket is not claimed.")
-            return
-        if ticket.claimed_by != ctx.author.id and not ctx.author.guild_permissions.manage_guild:
-            await ctx.warn("You did not claim this ticket.")
-            return
-        role_id = Roles.ticket_support
-        role = ctx.guild.get_role(role_id) if role_id else None
-        if role is not None:
-            await ctx.channel.set_permissions(
-                role,
-                view_channel=True,
-                send_messages=True,
-                reason="Ticket unclaimed",
-            )
-        owner = ctx.guild.get_member(ticket.owner_id)
-        await ctx.channel.edit(
-            name=ticket_channel_name(
-                owner.name if owner else str(ticket.owner_id),
-                claimed=False,
-            ),
-            reason="Ticket unclaimed",
+        panel = (
+            await self.find_ticket_panel(ctx.channel)
+            if isinstance(ctx.channel, discord.TextChannel)
+            else None
         )
-        await db.unclaim_ticket(ctx.channel.id)
-        await ctx.approve("This ticket is no longer claimed.")
+        await self.unclaim_ticket(ctx.channel, ctx.author, reply=ctx, panel=panel)
 
     @ticket.command(name="leaderboard", description="Show top support members by claims.")  # type: ignore[arg-type]
     @commands.has_permissions(manage_guild=True)
@@ -751,6 +778,39 @@ class Tickets(commands.Cog):
             ephemeral=True,
         )
 
+    def _button_reply(self, interaction: discord.Interaction[Any]) -> Any:
+        class Reply:
+            async def warn(self, text: str) -> None:
+                await interaction.followup.send(
+                    view=container_view(ui.TextDisplay(text)),
+                    ephemeral=True,
+                )
+
+            async def approve(self, text: str) -> None:
+                await interaction.followup.send(
+                    view=container_view(ui.TextDisplay(text)),
+                    ephemeral=True,
+                )
+
+        return Reply()
+
+    async def find_ticket_panel(
+        self,
+        channel: discord.TextChannel,
+    ) -> discord.Message | None:
+        if self.bot.user is None:
+            return None
+        try:
+            async for message in channel.history(limit=30):
+                if message.author.id != self.bot.user.id:
+                    continue
+                raw = str(message.components)
+                if "support:claim" in raw or "support:unclaim" in raw:
+                    return message
+        except discord.HTTPException:
+            return None
+        return None
+
     async def claim_button(self, interaction: discord.Interaction[Any]) -> None:
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
@@ -770,21 +830,38 @@ class Tickets(commands.Cog):
             )
             return
         await interaction.response.defer(ephemeral=True)
+        await self.claim_ticket(
+            interaction.channel,
+            interaction.user,
+            reply=self._button_reply(interaction),
+            panel=interaction.message,
+        )
 
-        class Reply:
-            async def warn(self, text: str) -> None:
-                await interaction.followup.send(
-                    view=container_view(ui.TextDisplay(text)),
-                    ephemeral=True,
-                )
-
-            async def approve(self, text: str) -> None:
-                await interaction.followup.send(
-                    view=container_view(ui.TextDisplay(text)),
-                    ephemeral=True,
-                )
-
-        await self.claim_ticket(interaction.channel, interaction.user, reply=Reply())
+    async def unclaim_button(self, interaction: discord.Interaction[Any]) -> None:
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("You cannot manage tickets.")),
+                ephemeral=True,
+            )
+            return
+        try:
+            database(self.bot)
+        except DatabaseUnavailable as exc:
+            await report_interaction(interaction, exc, where="Database")
+            return
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("This is not a ticket channel.")),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        await self.unclaim_ticket(
+            interaction.channel,
+            interaction.user,
+            reply=self._button_reply(interaction),
+            panel=interaction.message,
+        )
 
     async def close_button(self, interaction: discord.Interaction[Any]) -> None:
         if not isinstance(interaction.user, discord.Member) or not self.is_staff(interaction.user):
@@ -832,12 +909,30 @@ class Tickets(commands.Cog):
             pass
         await self.close_ticket(interaction, closed_by=interaction.user.id)
 
+    async def _refresh_panel(
+        self,
+        panel: discord.Message | None,
+        ticket: Ticket,
+        owner: discord.abc.User | discord.Member,
+        *,
+        claimed: bool,
+    ) -> None:
+        if panel is None:
+            return
+        try:
+            await panel.edit(
+                view=ticket_message(ticket.number, owner, ticket.reason, claimed=claimed)
+            )
+        except discord.HTTPException:
+            logger.warning("Could not refresh ticket panel %s", panel.id)
+
     async def claim_ticket(
         self,
         channel: discord.abc.Messageable,
         member: discord.Member,
         *,
         reply: Any,
+        panel: discord.Message | None = None,
     ) -> None:
         db = database(self.bot)
         if not self.is_staff(member):
@@ -871,6 +966,14 @@ class Tickets(commands.Cog):
             reason="Ticket claimed",
         )
         owner = channel.guild.get_member(ticket.owner_id)
+        owner_ref: discord.abc.User | discord.Member
+        if owner is not None:
+            owner_ref = owner
+        else:
+            try:
+                owner_ref = await self.bot.fetch_user(ticket.owner_id)
+            except discord.HTTPException:
+                owner_ref = member
         await channel.edit(
             name=ticket_channel_name(
                 owner.name if owner else str(ticket.owner_id),
@@ -879,7 +982,80 @@ class Tickets(commands.Cog):
             reason="Ticket claimed",
         )
         await db.claim_ticket(channel.id, member.id)
+        await self._refresh_panel(panel, ticket, owner_ref, claimed=True)
+        try:
+            await channel.send(
+                view=claim_notice(member),
+                allowed_mentions=discord.AllowedMentions(users=True),
+            )
+        except discord.HTTPException:
+            logger.warning("Could not send claim notice in %s", channel.id)
         await reply.approve(f"**{member.display_name}** claimed this ticket.")
+
+    async def unclaim_ticket(
+        self,
+        channel: discord.abc.Messageable,
+        member: discord.Member,
+        *,
+        reply: Any,
+        panel: discord.Message | None = None,
+    ) -> None:
+        db = database(self.bot)
+        if not self.is_staff(member):
+            await reply.warn("You cannot manage tickets.")
+            return
+        if not isinstance(channel, discord.TextChannel) or channel.guild is None:
+            await reply.warn("This is not a ticket channel.")
+            return
+        ticket = await db.ticket(channel.id)
+        if ticket is None:
+            await reply.warn("This is not a ticket channel.")
+            return
+        if ticket.claimed_by is None:
+            await reply.warn("This ticket is not claimed.")
+            return
+        if ticket.claimed_by != member.id and not member.guild_permissions.manage_guild:
+            await reply.warn("You did not claim this ticket.")
+            return
+        role_id = Roles.ticket_support
+        role = channel.guild.get_role(role_id) if role_id else None
+        if role is not None:
+            await channel.set_permissions(
+                role,
+                view_channel=True,
+                send_messages=True,
+                reason="Ticket unclaimed",
+            )
+        if ticket.claimed_by != member.id:
+            previous = channel.guild.get_member(ticket.claimed_by)
+            if previous is not None:
+                await channel.set_permissions(previous, overwrite=None, reason="Ticket unclaimed")
+        owner = channel.guild.get_member(ticket.owner_id)
+        owner_ref: discord.abc.User | discord.Member
+        if owner is not None:
+            owner_ref = owner
+        else:
+            try:
+                owner_ref = await self.bot.fetch_user(ticket.owner_id)
+            except discord.HTTPException:
+                owner_ref = member
+        await channel.edit(
+            name=ticket_channel_name(
+                owner.name if owner else str(ticket.owner_id),
+                claimed=False,
+            ),
+            reason="Ticket unclaimed",
+        )
+        await db.unclaim_ticket(channel.id)
+        await self._refresh_panel(panel, ticket, owner_ref, claimed=False)
+        try:
+            await channel.send(
+                view=unclaim_notice(member),
+                allowed_mentions=discord.AllowedMentions(users=True),
+            )
+        except discord.HTTPException:
+            logger.warning("Could not send unclaim notice in %s", channel.id)
+        await reply.approve("This ticket is no longer claimed.")
 
     async def close_ticket(self, origin: Any, *, closed_by: int) -> None:
         channel = getattr(origin, "channel", None)
@@ -904,38 +1080,84 @@ class Tickets(commands.Cog):
         logs = guild.get_channel(Channels.ticket_logs or 0)
         owner = guild.get_member(ticket.owner_id)
         closer = guild.get_member(closed_by)
+        claimed = (
+            guild.get_member(ticket.claimed_by) if ticket.claimed_by is not None else None
+        )
+        owner_label = (
+            f"{owner.mention} [`{owner.id}`]"
+            if owner is not None
+            else f"`{ticket.owner_id}`"
+        )
+        closer_label = (
+            f"{closer.mention} [`{closer.id}`]"
+            if closer is not None
+            else f"`{closed_by}`"
+        )
+        claimed_label = (
+            f"{claimed.mention} [`{claimed.id}`]"
+            if claimed is not None
+            else ("Unclaimed" if ticket.claimed_by is None else f"`{ticket.claimed_by}`")
+        )
+        body = (
+            f"**Ticket:** `#{ticket.number:03d}`\n"
+            f"**Type:** `{ticket.kind}`\n"
+            f"**Channel:** `{channel.name}`\n"
+            f"**Owner:** {owner_label}\n"
+            f"**Closed by:** {closer_label}\n"
+            f"**Claimed by:** {claimed_label}\n"
+            f"**Opened:** <t:{int(ticket.created_at.timestamp())}:f>\n"
+            f"**Inquiry:** {ticket.reason[:300]}"
+        )
+        if url is not None:
+            body += f"\n**Transcript:** [View]({url})"
+        closed_view = ui.LayoutView()
+        items: list[ui.Item[Any]] = [
+            ui.TextDisplay("## Ticket Closed\nA support ticket was closed."),
+            ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
+            ui.TextDisplay(body),
+        ]
+        if url is not None:
+            items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
+        closed_view.add_item(ui.Container(*items))
         if isinstance(logs, discord.TextChannel):
-            body = (
-                f"**Ticket:** `#{ticket.number:03d}`\n"
-                f"**Type:** `{ticket.kind}`\n"
-                f"**Channel:** `{channel.name}`\n"
-                f"**Owner:** {owner.display_name if owner else ticket.owner_id}\n"
-                f"**Closed by:** {closer.display_name if closer else closed_by}\n"
-                f"**Claimed by:** "
-                f"{ticket.claimed_by if ticket.claimed_by else 'Unclaimed'}\n"
-                f"**Opened:** <t:{int(ticket.created_at.timestamp())}:f>\n"
-                f"**Inquiry:** {ticket.reason[:300]}"
-            )
-            if url is not None:
-                body += f"\n**Transcript:** [View]({url})"
-            view = ui.LayoutView()
-            items: list[ui.Item[Any]] = [
-                ui.TextDisplay("## Ticket Closed\nA support ticket was closed."),
-                ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
-                ui.TextDisplay(body),
-            ]
-            if url is not None:
-                items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
-            view.add_item(ui.Container(*items))
             try:
-                await logs.send(view=view)
+                await logs.send(view=closed_view)
             except discord.HTTPException:
                 logger.warning("Could not send ticket log")
+        await self._dm_owner_closed(ticket, owner, closer, url)
         await db.delete_ticket(channel.id)
         try:
             await channel.delete(reason="Ticket closed")
         except discord.HTTPException:
             logger.warning("Could not delete ticket channel %s", channel.id)
+
+    async def _dm_owner_closed(
+        self,
+        ticket: Ticket,
+        owner: discord.Member | None,
+        closer: discord.Member | None,
+        url: str | None,
+    ) -> None:
+        user: discord.abc.User | None = owner
+        if user is None:
+            try:
+                user = await self.bot.fetch_user(ticket.owner_id)
+            except discord.HTTPException:
+                return
+        closer_name = closer.display_name if closer is not None else "staff"
+        text = (
+            f"## Ticket Closed\n"
+            f"Your ticket `#{ticket.number:03d}` was closed by **{closer_name}**."
+        )
+        if url is not None:
+            text += f"\n**Transcript:** [View]({url})"
+        items: list[ui.Item[Any]] = [ui.TextDisplay(text)]
+        if url is not None:
+            items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
+        try:
+            await user.send(view=container_view(*items))
+        except discord.HTTPException:
+            logger.warning("Could not DM ticket owner %s", ticket.owner_id)
 
     async def ensure_dashboard(self) -> None:
         async with self.bot.lock_for("ticket-dashboard"):
