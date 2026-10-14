@@ -163,13 +163,16 @@ def _positive(value: int | None) -> int | None:
 
 def normalize_cookie(cookie: str) -> str:
     raw = cookie.strip().strip('"').strip("'")
-    for prefix in (".ROBLOSECURITY=", "ROBLOSECURITY="):
-        if raw.upper().startswith(prefix.upper()):
-            raw = raw[len(prefix) :].strip()
-            break
     if "%" in raw:
         raw = unquote(raw)
-    return raw.strip()
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if raw.upper().startswith("ROBLOSECURITY="):
+        raw = raw.split("=", 1)[1].strip()
+    if raw.startswith(".ROBLOSECURITY="):
+        return raw
+    return f".ROBLOSECURITY={raw}"
 
 
 def _stable_sale_id(api_id: int, row: dict[str, Any]) -> int | None:
@@ -254,7 +257,7 @@ class Roblox:
         if group_id < 1:
             raise ValueError("invalid group")
         normalized = normalize_cookie(cookie)
-        if len(normalized) < 8 or any(char in normalized for char in "\r\n"):
+        if len(normalized) < 20 or any(char in normalized for char in "\r\n"):
             raise ValueError("invalid cookie")
         self._cookie = normalized
         self._group_id = group_id
@@ -278,8 +281,47 @@ class Roblox:
         await self._session.close()
 
     async def authenticated(self) -> AuthenticatedUser:
+        await self._ensure_csrf()
         payload = await self._request("GET", "https://users.roblox.com/v1/users/authenticated")
         return _read(AuthenticatedUser, payload)
+
+    async def _ensure_csrf(self) -> None:
+        if self._csrf is not None:
+            return
+        session = self._session
+        if session is None or session.closed:
+            raise RobloxError(0)
+        headers = self._auth_headers()
+        try:
+            async with session.post(
+                "https://auth.roblox.com/v2/logout",
+                headers=headers,
+                allow_redirects=False,
+            ) as response:
+                token = response.headers.get("x-csrf-token")
+                await response.read()
+                if response.status == 401:
+                    raise RobloxError(401)
+                if token:
+                    self._csrf = token
+        except RobloxError:
+            raise
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise RobloxError(0) from exc
+
+    def _auth_headers(self) -> dict[str, str]:
+        headers = {
+            "Cookie": self._cookie,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+        }
+        if self._csrf is not None:
+            headers["X-CSRF-TOKEN"] = self._csrf
+        return headers
 
     async def balance(self) -> tuple[int, int]:
         group = self._group_id
@@ -367,16 +409,9 @@ class Roblox:
         session = self._session
         if session is None or session.closed:
             raise RobloxError(0)
-        headers = {
-            "Cookie": f".ROBLOSECURITY={self._cookie}",
-            "Accept": "application/json, text/plain, */*",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            ),
-        }
-        if self._csrf is not None:
-            headers["X-CSRF-TOKEN"] = self._csrf
+        if self._csrf is None:
+            await self._ensure_csrf()
+        headers = self._auth_headers()
         for attempt in range(3):
             try:
                 async with session.request(
@@ -389,7 +424,7 @@ class Roblox:
                     token = response.headers.get("x-csrf-token")
                     if response.status == 403 and token and attempt == 0:
                         self._csrf = token
-                        headers["X-CSRF-TOKEN"] = token
+                        headers = self._auth_headers()
                         await response.read()
                         continue
                     if response.status == 429 and attempt < 2:
