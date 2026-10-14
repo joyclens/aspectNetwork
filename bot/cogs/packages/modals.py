@@ -35,9 +35,7 @@ class DetailsModal(ui.Modal, title="Package Details"):
         self.package_type: ui.Label[Any] = ui.Label(
             text="Package Type",
             component=ui.Select(
-                options=[
-                    discord.SelectOption(label=name, value=name) for name in PACKAGE_TYPES
-                ],
+                options=[discord.SelectOption(label=name, value=name) for name in PACKAGE_TYPES],
                 min_values=1,
                 max_values=1,
                 required=True,

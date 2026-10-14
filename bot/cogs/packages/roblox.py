@@ -55,6 +55,8 @@ def square_png(data: bytes) -> bytes:
 def reviewer_message(error: GamePassError) -> str:
     if error.status == 400:
         return "Roblox rejected the game pass (validation or moderation)."
+    if error.status == 401:
+        return "Roblox denied the API key. Check Open Cloud credentials."
     if error.status == 403:
         return "Roblox denied access. Check the Open Cloud API key scopes."
     if error.status == 409:
@@ -92,7 +94,6 @@ class GamePassClient:
         await self._session.close()
 
     async def create_pass(self, *, name: str, description: str, price: int) -> int:
-        # Text-only FormData defaults to urlencoded; Roblox requires multipart (415 otherwise).
         form = aiohttp.FormData(default_to_multipart=True)
         form.add_field("name", name[:50])
         form.add_field("description", description[:1000])
@@ -157,25 +158,6 @@ class GamePassClient:
             empty_ok=True,
         )
 
-    async def owns_pass(self, roblox_user_id: int, game_pass_id: int) -> bool:
-        if roblox_user_id < 1 or game_pass_id < 1:
-            raise GamePassError(0, "Invalid ownership lookup.")
-        try:
-            payload = await self._request(
-                "GET",
-                f"https://apis.roblox.com/cloud/v2/users/{roblox_user_id}/inventory-items",
-                params={"filter": f"gamePassIds={game_pass_id}"},
-            )
-        except GamePassError as exc:
-            if exc.status == 403:
-                raise GamePassError(
-                    403,
-                    "Buyer inventory is private. Ask them to set inventory to public.",
-                ) from exc
-            raise
-        items = payload.get("inventoryItems")
-        return isinstance(items, list) and len(items) > 0
-
     async def _request(
         self,
         method: str,
@@ -206,10 +188,11 @@ class GamePassClient:
             ) as response:
                 if response.status == 429 and attempt < 3:
                     retry = response.headers.get("Retry-After")
-                    if retry and retry.replace(".", "", 1).isdigit():
-                        delay = float(retry)
-                    else:
-                        delay = float(2**attempt)
+                    delay = (
+                        float(retry)
+                        if retry and retry.replace(".", "", 1).isdigit()
+                        else float(2**attempt)
+                    )
                     await asyncio.sleep(delay)
                     return await self._request(
                         method,
@@ -221,9 +204,7 @@ class GamePassClient:
                     )
                 if response.status == 204 or (empty_ok and response.status < 300):
                     if response.status >= 400:
-                        raise GamePassError(response.status, reviewer_message(
-                            GamePassError(response.status, f"status {response.status}")
-                        ))
+                        raise GamePassError(response.status, f"status {response.status}")
                     return {}
                 body = await _json_or_empty(response)
                 if response.status == 429:
@@ -235,8 +216,10 @@ class GamePassClient:
                         retry_after = float(retry)
                     raise GamePassError(429, "Rate limited.", retry_after)
                 if response.status >= 400:
-                    message = _error_message(body) or f"status {response.status}"
-                    raise GamePassError(response.status, message)
+                    raise GamePassError(
+                        response.status,
+                        _error_message(body) or f"status {response.status}",
+                    )
                 return body
         except TimeoutError as exc:
             if attempt < 2:
@@ -276,7 +259,6 @@ def _error_message(body: dict[str, Any]) -> str | None:
             message = first.get("message")
             if isinstance(message, str):
                 return message
-            code = first.get("code")
-            if code == 46:
+            if first.get("code") == 46:
                 return "Icon upload missing file part (error 46)."
     return None

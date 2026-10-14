@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from bot.cogs.packages.constants import POLL_INTERVAL_SECONDS, POLL_RATE_LIMIT, POLL_RATE_WINDOW
+from bot.cogs.packages.constants import POLL_INTERVAL_SECONDS
 from bot.cogs.packages.modals import DetailsModal
 from bot.cogs.packages.service import PackageService
 from bot.cogs.packages.views import (
@@ -34,7 +32,6 @@ class Packages(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
         self.service = PackageService(bot)
-        self._poll_times: list[float] = []
 
     async def cog_load(self) -> None:
         self.bot.add_dynamic_items(
@@ -79,13 +76,10 @@ class Packages(commands.Cog):
             if cached is not None:
                 member = cached
         if not self.service.can_submit(member):
-            # Single response only — never open the modal when denied.
             await interaction.response.send_message(
                 view=container_view(discord.ui.TextDisplay("Packager role required.")),
                 ephemeral=True,
             )
-            return
-        if interaction.response.is_done():
             return
         self.service.draft_for(member.id)
         await interaction.response.send_modal(DetailsModal(member.id))
@@ -206,42 +200,23 @@ class Packages(commands.Cog):
         except Exception as exc:
             remember_error(self.bot.traceback, exc, where="Package poll")
             return
-        client = self.service.gamepass()
-        if client is None:
+        if not pending:
             return
-        sem = asyncio.Semaphore(5)
-        async def one(purchase: Any) -> None:
-            async with sem:
-                await self._throttle()
-                package = await db.package(purchase.package_id)
-                if package is None or package.gamepass_id is None:
-                    return
-                try:
-                    owns = await client.owns_pass(purchase.buyer_roblox_id, package.gamepass_id)
-                except Exception as exc:
-                    remember_error(self.bot.traceback, exc, where="Package inventory")
-                    return
-                if owns:
-                    await self.service.complete_purchase(purchase)
-
-        await asyncio.gather(*(one(item) for item in pending))
+        await self.service.sync_recent_sales()
+        for purchase in pending:
+            package = await db.package(purchase.package_id)
+            if package is None or package.gamepass_id is None:
+                continue
+            if await self.service.buyer_paid(
+                purchase.buyer_roblox_id,
+                package.gamepass_id,
+                since=purchase.created_at,
+            ):
+                await self.service.complete_purchase(purchase)
 
     @poll_purchases.before_loop
     async def before_poll(self) -> None:
         await self.bot.wait_until_ready()
-
-    async def _throttle(self) -> None:
-        now = time.monotonic()
-        self._poll_times = [stamp for stamp in self._poll_times if now - stamp < POLL_RATE_WINDOW]
-        if len(self._poll_times) >= POLL_RATE_LIMIT:
-            wait = POLL_RATE_WINDOW - (now - self._poll_times[0])
-            if wait > 0:
-                await asyncio.sleep(wait)
-            now = time.monotonic()
-            self._poll_times = [
-                stamp for stamp in self._poll_times if now - stamp < POLL_RATE_WINDOW
-            ]
-        self._poll_times.append(time.monotonic())
 
 
 async def setup(bot: Aspect) -> None:

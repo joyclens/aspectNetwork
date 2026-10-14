@@ -208,14 +208,10 @@ def _package(row: Any) -> Package:
             int(row["forum_message_id"]) if row["forum_message_id"] is not None else None
         ),
         submission_channel_id=(
-            int(row["submission_channel_id"])
-            if row["submission_channel_id"] is not None
-            else None
+            int(row["submission_channel_id"]) if row["submission_channel_id"] is not None else None
         ),
         submission_message_id=(
-            int(row["submission_message_id"])
-            if row["submission_message_id"] is not None
-            else None
+            int(row["submission_message_id"]) if row["submission_message_id"] is not None else None
         ),
         showcase_filename=str(row["showcase_filename"] or ""),
         sold_at=row["sold_at"],
@@ -320,6 +316,32 @@ class Database:
             agent_id,
         )
         return [sale for row in rows if (sale := _sale(row))]
+
+    async def agent_bought_gamepass(
+        self,
+        group_id: int,
+        agent_id: int,
+        gamepass_id: int,
+        *,
+        since: datetime | None = None,
+    ) -> bool:
+        row = await self._pool.fetchrow(
+            """
+            SELECT 1
+            FROM transactions
+            WHERE group_id = $1
+              AND kind = 'Sale'
+              AND agent_id = $2
+              AND item_id = $3
+              AND ($4::timestamptz IS NULL OR created_at >= $4)
+            LIMIT 1
+            """,
+            group_id,
+            agent_id,
+            gamepass_id,
+            since,
+        )
+        return row is not None
 
     async def recent_sale(self, group_id: int) -> Sale | None:
         row = await self._pool.fetchrow(

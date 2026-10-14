@@ -42,11 +42,7 @@ def build_draft_view(
     buttons: list[Any] | None = None,
 ) -> tuple[discord.ui.LayoutView, list[discord.File]]:
     lines = format_draft_lines(draft, step)
-    files, media = (
-        discord_files_and_media(draft.showcases, draft.files)
-        if step >= 3
-        else ([], [])
-    )
+    files, media = discord_files_and_media(draft.showcases, draft.files) if step >= 3 else ([], [])
     row = buttons
     if row is None:
         row = [DraftEdit(user_id, step), DraftContinue(user_id, step)]
@@ -66,7 +62,6 @@ async def publish_draft(interaction: Interaction, user_id: int, step: int) -> No
         return
     draft = service.draft_for(user_id)
     view, files = build_draft_view(user_id, step, draft)
-    # Modal from a draft button → edit that ephemeral in place.
     if interaction.message is not None:
         await interaction.response.edit_message(view=view, attachments=files)
         return
@@ -115,7 +110,6 @@ class DraftContinue(ui.Button[Any]):
                 )
                 return
             await interaction.response.defer(ephemeral=True, thinking=True)
-            # Strip buttons immediately so Continue cannot be spammed.
             if interaction.message is not None:
                 try:
                     await interaction.message.edit(
@@ -144,9 +138,7 @@ class DraftContinue(ui.Button[Any]):
                 return
             service.end_submit(self.user_id)
             done = container_view(
-                ui.TextDisplay(
-                    f"## Submitted\n**{package.title}** is in review (`{package.id}`)."
-                )
+                ui.TextDisplay(f"## Submitted\n**{package.title}** is in review (`{package.id}`).")
             )
             if interaction.message is not None:
                 try:
@@ -178,15 +170,6 @@ class DraftEdit(ui.Button[Any]):
             await interaction.response.send_modal(MetaModal(self.user_id))
         else:
             await interaction.response.send_modal(FilesModal(self.user_id))
-
-
-def draft_summary(user_id: int, step: int, lines: list[str]) -> discord.ui.LayoutView:
-    return draft_layout(
-        user_id,
-        step,
-        lines,
-        buttons=[DraftEdit(user_id, step), DraftContinue(user_id, step)],
-    )
 
 
 class ApproveButton(ui.DynamicItem[ui.Button[Any]], template=APPROVE_TEMPLATE):
@@ -371,29 +354,31 @@ class ConfirmPurchaseButton(ui.DynamicItem[ui.Button[Any]], template=CONFIRM_TEM
             )
             return
         package = await db.package(purchase.package_id)
-        client_gp = service.gamepass()
-        if package is None or package.gamepass_id is None or client_gp is None:
+        if package is None or package.gamepass_id is None:
             await interaction.followup.send(
-                view=container_view(ui.TextDisplay("Ownership check is unavailable.")),
+                view=container_view(ui.TextDisplay("Game pass is missing.")),
                 ephemeral=True,
             )
             return
-        try:
-            owns = await client_gp.owns_pass(purchase.buyer_roblox_id, package.gamepass_id)
-        except Exception as exc:
-            await report_interaction(interaction, exc, where="Package confirm")
-            return
-        if not owns:
+        paid = await service.buyer_paid(
+            purchase.buyer_roblox_id,
+            package.gamepass_id,
+            since=purchase.created_at,
+            refresh=True,
+        )
+        if not paid:
             await interaction.followup.send(
                 view=container_view(
-                    ui.TextDisplay("Purchase not detected yet. Buy the game pass, then try again.")
+                    ui.TextDisplay(
+                        "We're unable to verify your purchase, if you've just bought the game pass, please wait a few minutes and try again."
+                    )
                 ),
                 ephemeral=True,
             )
             return
         await service.complete_purchase(purchase)
         await interaction.followup.send(
-            view=container_view(ui.TextDisplay("Payment detected. Delivering files.")),
+            view=container_view(ui.TextDisplay("**Thanks for purchasing,** we'll deliver the files shortly.")),
             ephemeral=True,
         )
 
@@ -538,9 +523,7 @@ def format_draft_lines(draft: Any, step: int) -> list[str]:
     if step >= 3:
         total = len(draft.showcases) + len(draft.files)
         if total > 10:
-            lines.append(
-                f"-# Preview shows 10 of `{total}` files · all are stored on submit."
-            )
+            lines.append(f"-# Preview shows 10 of `{total}` files · all are stored on submit.")
     errors = draft_errors(draft, step=step)
     if errors:
         lines.append("")

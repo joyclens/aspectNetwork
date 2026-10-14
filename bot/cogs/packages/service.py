@@ -10,40 +10,36 @@ import discord
 from bot.cogs.packages.constants import (
     CONFIRM_COOLDOWN_SECONDS,
     FORUM_CHANNELS,
-    IMAGE_TYPES,
     KIND_GIFT,
     PACKAGER_SHARE_PERCENT,
     PURCHASE_TTL_SECONDS,
     REPORT_COOLDOWN_SECONDS,
     SELL_ONE_TIME,
-    SHOWCASE_TYPES,
     STATUS_ACCEPTED,
     STATUS_SOLD,
 )
 from bot.cogs.packages.layouts import forum_layout, report_layout, submission_layout
 from bot.cogs.packages.media import (
     first_image_showcase,
+    is_image,
     media_from_attachments,
     parse_storage_ids,
     safe_filename,
 )
-from bot.cogs.packages.models import (
-    PackageDraft,
-    StoredFile,
-    packager_share,
-    resolve_purchase_kind,
-)
+from bot.cogs.packages.models import PackageDraft, StoredFile, packager_share, resolve_purchase_kind
 from bot.cogs.packages.roblox import GamePassClient, GamePassError, reviewer_message
 from bot.core.bot import Aspect
 from bot.core.database import Package, PackagePurchase
-from bot.core.ids import Channels, Roles
+from bot.core.ids import App, Channels, Guild, Roles
 from bot.services.dock import DockError
+from bot.services.roblox import RobloxError
 from bot.shared.checks import database
 from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")
 
 Interaction = discord.Interaction[Any]
+DM_BATCH_BYTES = 7_500_000
 
 
 class PackageService:
@@ -69,11 +65,7 @@ class PackageService:
         raw = key.get_secret_value().strip()
         if not raw:
             return None
-        return GamePassClient(
-            raw,
-            self.bot.settings.roblox_universe_id,
-            self.bot.session,
-        )
+        return GamePassClient(raw, self.bot.settings.roblox_universe_id, self.bot.session)
 
     def draft_for(self, user_id: int) -> PackageDraft:
         draft = self.drafts.get(user_id)
@@ -90,9 +82,9 @@ class PackageService:
             return False
         if member.guild_permissions.administrator:
             return True
-        if member.get_role(role_id) is not None:
-            return True
-        return any(role.id == role_id for role in member.roles)
+        return member.get_role(role_id) is not None or any(
+            role.id == role_id for role in member.roles
+        )
 
     def is_packager(self, member: discord.Member) -> bool:
         return self.has_role(member, Roles.packager)
@@ -115,8 +107,6 @@ class PackageService:
         return found  # type: ignore[return-value]
 
     async def linked_roblox(self, user_id: int) -> int | None:
-        from bot.core.ids import Guild
-
         dock = self.bot.dock
         if dock is None:
             return None
@@ -124,9 +114,7 @@ class PackageService:
             linked = await dock.linked_roblox(user_id, Guild.id)
         except DockError:
             return None
-        if linked is None:
-            return None
-        return int(linked)
+        return int(linked) if linked is not None else None
 
     async def store_files(
         self,
@@ -162,12 +150,15 @@ class PackageService:
         icon = first_image_showcase(draft.showcases) or draft.showcases[0]
         return channel.id, messages[0].id, icon.filename, messages
 
+    def _storage_media(self, messages: list[discord.Message]) -> list[tuple[str, str | None]]:
+        return media_from_attachments(
+            [item for message in messages for item in message.attachments]
+        )
+
     async def submit_final(self, interaction: Interaction, draft: PackageDraft) -> Package:
         from bot.cogs.packages.views import ApproveButton, DenyButton
 
-        channel_id, message_id, showcase_name, storage_messages = await self.store_files(
-            draft
-        )
+        channel_id, message_id, showcase_name, storage_messages = await self.store_files(draft)
         submissions = await self.channel(Channels.package_submissions)
         if not isinstance(submissions, discord.TextChannel):
             raise RuntimeError("Package submissions channel is unavailable.")
@@ -189,18 +180,12 @@ class PackageService:
             submission_message_id=0,
             showcase_filename=showcase_name,
         )
-        # Use storage CDN URLs in MediaGallery/File — avoids attachment:// mismatch 50035.
-        media: list[tuple[str, str | None]] = []
-        for message in storage_messages:
-            media.extend(media_from_attachments(message.attachments))
+        media = self._storage_media(storage_messages)
         posted = await submissions.send(
             view=submission_layout(
                 package,
-                media=media,
-                buttons=[
-                    ApproveButton(package.id).item,
-                    DenyButton(package.id).item,
-                ],
+                media=media or None,
+                buttons=[ApproveButton(package.id).item, DenyButton(package.id).item],
             ),
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -228,49 +213,31 @@ class PackageService:
                 description=claimed.description,
                 price=claimed.price,
             )
-            icon_note = ""
             storage_messages = await self._storage_messages(claimed)
-            storage_media = media_from_attachments(
-                [item for message in storage_messages for item in message.attachments]
+            storage_media = self._storage_media(storage_messages)
+            icon_note = await self._upload_showcase_icon(
+                client,
+                claimed,
+                gamepass_id,
+                storage_messages,
             )
-            showcase = self._pick_showcase_attachment(claimed, storage_messages)
-            forum_file: discord.File | None = None
-            forum_media: list[tuple[str, str | None]] = []
-            if showcase is not None:
-                content_type = showcase.content_type
-                showcase_bytes = await showcase.read()
-                uploaded = discord.File(
-                    io.BytesIO(showcase_bytes),
-                    filename=safe_filename(0, showcase.filename, prefix="showcase_"),
-                )
-                forum_file = uploaded
-                forum_media = [(uploaded.uri, content_type)]
-                if content_type in IMAGE_TYPES:
-                    try:
-                        await client.upload_icon(gamepass_id, showcase_bytes)
-                    except GamePassError as exc:
-                        icon_note = f" Icon upload failed: {reviewer_message(exc)}"
-                else:
-                    icon_note = " Showcase is a video; icon upload was skipped."
+            forum_media = self._forum_media(storage_media)
             forum_id = FORUM_CHANNELS.get(claimed.package_type, 0)
             forum = await self.channel(forum_id)
             if not isinstance(forum, discord.ForumChannel):
                 raise RuntimeError("Forum channel is unavailable for this package type.")
-            thread_kwargs: dict[str, Any] = {
-                "name": claimed.title[:100],
-                "view": forum_layout(
+            thread_with = await forum.create_thread(
+                name=claimed.title[:100],
+                view=forum_layout(
                     claimed,
-                    media=forum_media or storage_media[:1] or None,
+                    media=forum_media,
                     buttons=[
                         PurchaseButton(claimed.id).item,
                         ReportButton(claimed.id).item,
                     ],
                 ),
-                "allowed_mentions": discord.AllowedMentions.none(),
-            }
-            if forum_file is not None:
-                thread_kwargs["file"] = forum_file
-            thread_with = await forum.create_thread(**thread_kwargs)
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
             accepted = await db.accept_package(
                 claimed.id,
                 gamepass_id=gamepass_id,
@@ -280,17 +247,15 @@ class PackageService:
             )
             if accepted is None:
                 raise RuntimeError("Failed to mark package accepted.")
-            status = f"-# Approved by <@{interaction.user.id}>{icon_note}"
-            if interaction.message is not None:
-                await interaction.message.edit(
-                    view=submission_layout(
-                        accepted,
-                        media=storage_media or None,
-                        status_line=status,
-                        buttons=None,
-                    ),
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
+            await self._edit_submission(
+                interaction.message,
+                submission_layout(
+                    accepted,
+                    media=storage_media or None,
+                    status_line=f"-# Approved by <@{interaction.user.id}>{icon_note}",
+                    buttons=None,
+                ),
+            )
             await self._dm(
                 accepted.packager_id,
                 f"Your package **{accepted.title}** was approved.",
@@ -299,10 +264,54 @@ class PackageService:
         except GamePassError as exc:
             await db.revert_package_pending(package_id)
             return reviewer_message(exc)
-        except Exception as exc:
+        except Exception:
             await db.revert_package_pending(package_id)
             logger.exception("Package approve failed")
-            return str(exc) or "Approval failed."
+            return "Approval failed."
+
+    async def _upload_showcase_icon(
+        self,
+        client: GamePassClient,
+        package: Package,
+        gamepass_id: int,
+        storage_messages: list[discord.Message],
+    ) -> str:
+        showcase = self._pick_showcase_attachment(package, storage_messages)
+        if showcase is None:
+            return ""
+        if not is_image(showcase.content_type, showcase.filename):
+            return " Showcase is a video; icon upload was skipped."
+        try:
+            await client.upload_icon(gamepass_id, await showcase.read())
+        except GamePassError as exc:
+            return f" Icon upload failed: {reviewer_message(exc)}"
+        return ""
+
+    def _forum_media(
+        self,
+        storage_media: list[tuple[str, str | None]],
+    ) -> list[tuple[str, str | None]] | None:
+        for url, content_type in storage_media:
+            name = url.rsplit("/", 1)[-1].split("?", 1)[0]
+            if is_image(content_type, name) or name.startswith("showcase_"):
+                return [(url, content_type)]
+        return storage_media[:1] or None
+
+    async def _edit_submission(
+        self,
+        message: discord.Message | None,
+        view: discord.ui.LayoutView,
+    ) -> None:
+        if message is None:
+            return
+        try:
+            await message.edit(
+                view=view,
+                attachments=[],
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException:
+            logger.exception("Could not update package submission message")
 
     async def deny(self, interaction: Interaction, package_id: int, reason: str) -> str | None:
         if not isinstance(interaction.user, discord.Member) or not self.is_management(
@@ -313,24 +322,16 @@ class PackageService:
         denied = await db.deny_package(package_id, interaction.user.id)
         if denied is None:
             return "This package cannot be denied."
-        status = f"-# Denied by <@{interaction.user.id}>: {reason}"
-        if interaction.message is not None:
-            storage_media = media_from_attachments(
-                [
-                    item
-                    for message in await self._storage_messages(denied)
-                    for item in message.attachments
-                ]
-            )
-            await interaction.message.edit(
-                view=submission_layout(
-                    denied,
-                    media=storage_media or None,
-                    status_line=status,
-                    buttons=None,
-                ),
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+        media = self._storage_media(await self._storage_messages(denied))
+        await self._edit_submission(
+            interaction.message,
+            submission_layout(
+                denied,
+                media=media or None,
+                status_line=f"-# Denied by <@{interaction.user.id}>: {reason}",
+                buttons=None,
+            ),
+        )
         await self._dm(
             denied.packager_id,
             f"Your package **{denied.title}** was denied.\nReason: {reason}",
@@ -368,15 +369,11 @@ class PackageService:
         roblox_id = await self.linked_roblox(interaction.user.id)
         if roblox_id is None:
             return None, "Verify your Roblox account before purchasing."
-        if package.gamepass_id is not None:
-            client = self.gamepass()
-            if client is not None:
-                try:
-                    owns = await client.owns_pass(roblox_id, package.gamepass_id)
-                except GamePassError as exc:
-                    return None, reviewer_message(exc)
-                if owns and not await db.buyer_owns_package(package.id, interaction.user.id):
-                    return None, "You already own this game pass."
+        if package.gamepass_id is not None and await self.buyer_paid(
+            roblox_id,
+            package.gamepass_id,
+        ):
+            return None, "You already own this game pass."
         if await db.buyer_owns_package(package.id, interaction.user.id):
             return None, "You already have an active purchase for this package."
         purchase = await db.create_purchase(
@@ -395,6 +392,37 @@ class PackageService:
             return False
         self._confirm_at[user_id] = now
         return True
+
+    async def sync_recent_sales(self) -> None:
+        roblox = self.bot.roblox
+        if roblox is None:
+            return
+        try:
+            page, _cursor = await roblox.sales()
+        except RobloxError:
+            logger.warning("Could not refresh group sales for package payment check")
+            return
+        if page:
+            await database(self.bot).store_sales(App.roblox_group_id, page)
+
+    async def buyer_paid(
+        self,
+        buyer_roblox_id: int,
+        gamepass_id: int,
+        *,
+        since: datetime | None = None,
+        refresh: bool = False,
+    ) -> bool:
+        if buyer_roblox_id < 1 or gamepass_id < 1:
+            return False
+        if refresh:
+            await self.sync_recent_sales()
+        return await database(self.bot).agent_bought_gamepass(
+            App.roblox_group_id,
+            buyer_roblox_id,
+            gamepass_id,
+            since=since,
+        )
 
     async def complete_purchase(self, purchase: PackagePurchase) -> None:
         db = database(self.bot)
@@ -483,21 +511,21 @@ class PackageService:
             thread = self.bot.get_channel(sold.forum_thread_id)
             if thread is None:
                 thread = await self.bot.fetch_channel(sold.forum_thread_id)
-            if isinstance(thread, discord.Thread):
-                if sold.forum_message_id is not None:
-                    message = await thread.fetch_message(sold.forum_message_id)
-                    kept = media_from_attachments(message.attachments)
-                    await message.edit(
-                        view=forum_layout(
-                            sold,
-                            media=kept or None,
-                            status_line="-# Sold",
-                            buttons=None,
-                        ),
-                        attachments=message.attachments,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                    )
-                await thread.edit(archived=True, locked=True)
+            if not isinstance(thread, discord.Thread):
+                return
+            if sold.forum_message_id is not None:
+                message = await thread.fetch_message(sold.forum_message_id)
+                await message.edit(
+                    view=forum_layout(
+                        sold,
+                        media=media_from_attachments(message.attachments) or None,
+                        status_line="-# Sold",
+                        buttons=None,
+                    ),
+                    attachments=list(message.attachments),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            await thread.edit(archived=True, locked=True)
         except discord.HTTPException:
             logger.warning("Could not update sold forum post for package %s", package.id)
 
@@ -511,9 +539,7 @@ class PackageService:
         channel = await self.channel(Channels.package_submissions)
         if isinstance(channel, discord.TextChannel):
             await channel.send(
-                view=container_view(
-                    discord.ui.TextDisplay(f"<@{package.packager_id}> {text}")
-                ),
+                view=container_view(discord.ui.TextDisplay(f"<@{package.packager_id}> {text}")),
                 allowed_mentions=discord.AllowedMentions(users=True),
             )
 
@@ -534,16 +560,14 @@ class PackageService:
         try:
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             await user.send(
-                view=container_view(
-                    discord.ui.TextDisplay(f"Files for **{package.title}**:")
-                ),
+                view=container_view(discord.ui.TextDisplay(f"Files for **{package.title}**:")),
             )
             batch: list[discord.File] = []
             size = 0
             for item in files:
                 raw = item.fp.read()
                 item.fp.seek(0)
-                if batch and size + len(raw) > 7_500_000:
+                if batch and size + len(raw) > DM_BATCH_BYTES:
                     await user.send(files=batch)
                     batch = []
                     size = 0
@@ -565,9 +589,8 @@ class PackageService:
             first = await channel.fetch_message(package.storage_message_id)
         except discord.HTTPException:
             return []
-        ids = parse_storage_ids(first.content, first.id)
         messages: list[discord.Message] = []
-        for message_id in ids:
+        for message_id in parse_storage_ids(first.content, first.id):
             if message_id == first.id:
                 messages.append(first)
                 continue
@@ -587,12 +610,12 @@ class PackageService:
             return None
         for attachment in attachments:
             name = attachment.filename.lower()
-            if name.startswith("showcase_") or attachment.filename == package.showcase_filename:
-                content = (attachment.content_type or "").lower()
-                if content in IMAGE_TYPES or name.endswith(
-                    (".png", ".jpg", ".jpeg", ".gif", ".webp")
-                ):
-                    return attachment
+            if not (
+                name.startswith("showcase_") or attachment.filename == package.showcase_filename
+            ):
+                continue
+            if is_image(attachment.content_type, attachment.filename):
+                return attachment
         for attachment in attachments:
             if attachment.filename.startswith("showcase_"):
                 return attachment
@@ -609,19 +632,3 @@ class PackageService:
                 data = await attachment.read()
                 files.append(discord.File(io.BytesIO(data), filename=attachment.filename))
         return files
-
-
-def file_from_upload(attachment: discord.Attachment, data: bytes) -> StoredFile | None:
-    content = (attachment.content_type or "").lower()
-    if content not in SHOWCASE_TYPES and not content:
-        content = "application/octet-stream"
-    return StoredFile(
-        filename=attachment.filename[:200],
-        content_type=content,
-        data=data,
-    )
-
-
-def is_showcase_ok(attachment: discord.Attachment) -> bool:
-    content = (attachment.content_type or "").lower()
-    return content in SHOWCASE_TYPES
