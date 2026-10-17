@@ -538,18 +538,6 @@ class Database:
         )
         return int(value or 0)
 
-    async def expired_giveaways(self, now: datetime) -> list[Giveaway]:
-        rows = await self._pool.fetch(
-            """
-            SELECT message_id, guild_id, channel_id, winners, members, finish, host_id,
-                   title, required_roles, ignore_roles, required_servers
-            FROM giveaways
-            WHERE finish <= $1
-            """,
-            now,
-        )
-        return [_giveaway(row) for row in rows]
-
     async def take_expired_giveaway(self, now: datetime) -> Giveaway | None:
         row = await self._pool.fetchrow(
             """
