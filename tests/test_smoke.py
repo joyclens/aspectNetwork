@@ -64,9 +64,9 @@ async def test_extensions_load_and_command_tree() -> None:
     for view in persistent:
         assert view.timeout is None
         assert _collect_custom_ids(view), f"{type(view).__name__} has no custom_id"
-    assert any(
-        getattr(view, "timeout", None) is None for view in bot.persistent_views
-    ), "giveaway persistent views were not registered"
+    assert any(getattr(view, "timeout", None) is None for view in bot.persistent_views), (
+        "giveaway persistent views were not registered"
+    )
 
     from bot.cogs.packages.views import (
         ApproveButton,
