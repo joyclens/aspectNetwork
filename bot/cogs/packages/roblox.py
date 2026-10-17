@@ -117,7 +117,7 @@ class GamePassClient:
         image: bytes,
         filename: str = "icon.png",
     ) -> None:
-        png = square_png(image)
+        png = await asyncio.to_thread(square_png, image)
         form = aiohttp.FormData()
         form.add_field(
             "request",

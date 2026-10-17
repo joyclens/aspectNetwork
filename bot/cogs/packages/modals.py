@@ -248,6 +248,10 @@ class PurchaseModal(ui.Modal, title="Purchase Package"):
     async def on_submit(self, interaction: Interaction) -> None:
         service = _service(interaction)
         if service is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         type_select = self.purchase_type.component
         user_select = self.recipient.component
@@ -275,6 +279,10 @@ class PurchaseModal(ui.Modal, title="Purchase Package"):
             return
         client = interaction.client
         if not isinstance(client, Aspect):
+            await interaction.followup.send(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         package = await database(client).package(self.package_id)
         if package is None or package.gamepass_id is None:

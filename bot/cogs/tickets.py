@@ -959,40 +959,48 @@ class Tickets(commands.Cog):
         if ticket.claimed_by is not None:
             await reply.warn("This ticket is already claimed.")
             return
+        if not await db.claim_ticket(channel.id, member.id):
+            await reply.warn("This ticket is already claimed.")
+            return
         role_id = Roles.ticket_support
         role = channel.guild.get_role(role_id) if role_id else None
-        if role is not None:
+        try:
+            if role is not None:
+                await channel.set_permissions(
+                    role,
+                    view_channel=True,
+                    send_messages=False,
+                    reason="Ticket claimed",
+                )
             await channel.set_permissions(
-                role,
+                member,
                 view_channel=True,
-                send_messages=False,
+                send_messages=True,
+                attach_files=True,
+                embed_links=True,
                 reason="Ticket claimed",
             )
-        await channel.set_permissions(
-            member,
-            view_channel=True,
-            send_messages=True,
-            attach_files=True,
-            embed_links=True,
-            reason="Ticket claimed",
-        )
-        owner = channel.guild.get_member(ticket.owner_id)
-        owner_ref: discord.abc.User | discord.Member
-        if owner is not None:
-            owner_ref = owner
-        else:
-            try:
-                owner_ref = await self.bot.fetch_user(ticket.owner_id)
-            except discord.HTTPException:
-                owner_ref = member
-        await channel.edit(
-            name=ticket_channel_name(
-                owner.name if owner else str(ticket.owner_id),
-                claimed=True,
-            ),
-            reason="Ticket claimed",
-        )
-        await db.claim_ticket(channel.id, member.id)
+            owner = channel.guild.get_member(ticket.owner_id)
+            owner_ref: discord.abc.User | discord.Member
+            if owner is not None:
+                owner_ref = owner
+            else:
+                try:
+                    owner_ref = await self.bot.fetch_user(ticket.owner_id)
+                except discord.HTTPException:
+                    owner_ref = member
+            await channel.edit(
+                name=ticket_channel_name(
+                    owner.name if owner else str(ticket.owner_id),
+                    claimed=True,
+                ),
+                reason="Ticket claimed",
+            )
+        except discord.HTTPException:
+            await db.unclaim_ticket(channel.id)
+            logger.exception("Could not apply claim permissions for %s", channel.id)
+            await reply.warn("Could not claim this ticket.")
+            return
         await self._refresh_panel(panel, ticket, owner_ref, claimed=True)
         try:
             await channel.send(
