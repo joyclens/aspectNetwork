@@ -53,14 +53,14 @@ class Packages(commands.Cog):
             ResendButton,
         )
 
-    package = app_commands.Group(name="package", description="Package marketplace")
+    package = app_commands.Group(name="package", description="Package marketplace commands.")
     payouts = app_commands.Group(
         name="payouts",
-        description="Package payouts",
+        description="Package payout commands.",
         parent=package,
     )
 
-    @package.command(name="submit", description="Submit a package for review")
+    @package.command(name="submit", description="Submit a package for review.")
     async def submit(self, interaction: discord.Interaction[Any]) -> None:
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
@@ -82,7 +82,7 @@ class Packages(commands.Cog):
         self.service.draft_for(member.id)
         await interaction.response.send_modal(DetailsModal(member.id))
 
-    @package.command(name="earnings", description="View your package earnings")
+    @package.command(name="earnings", description="View your package earnings.")
     async def earnings(self, interaction: discord.Interaction[Any]) -> None:
         if not isinstance(interaction.user, discord.Member):
             await interaction.response.send_message(
@@ -103,7 +103,7 @@ class Packages(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @payouts.command(name="summary", description="Pending payout totals per packager")
+    @payouts.command(name="summary", description="Show pending payout totals per packager.")
     async def payouts_summary(self, interaction: discord.Interaction[Any]) -> None:
         if not isinstance(interaction.user, discord.Member) or not self.service.is_management(
             interaction.user
@@ -127,7 +127,7 @@ class Packages(commands.Cog):
             ephemeral=True,
         )
 
-    @payouts.command(name="view", description="View payouts for a packager")
+    @payouts.command(name="view", description="View earnings and payouts for a packager.")
     @app_commands.describe(user="Packager to inspect")
     async def payouts_view(
         self,
@@ -149,7 +149,7 @@ class Packages(commands.Cog):
             allowed_mentions=discord.AllowedMentions(users=[user]),
         )
 
-    @payouts.command(name="settle", description="Mark pending payouts paid for a packager")
+    @payouts.command(name="settle", description="Mark pending payouts paid for a packager.")
     @app_commands.describe(user="Packager to settle")
     async def payouts_settle(
         self,

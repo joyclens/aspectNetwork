@@ -285,26 +285,20 @@ def ticket_message(
 
 def claim_notice(member: discord.Member) -> AspectLayout:
     return container_view(
-        ui.TextDisplay(
-            f"## Ticket Claimed\n{member.mention} claimed this ticket."
-        )
+        ui.TextDisplay(f"## Ticket Claimed\n{member.mention} claimed this ticket.")
     )
 
 
 def unclaim_notice(member: discord.Member) -> AspectLayout:
     return container_view(
-        ui.TextDisplay(
-            f"## Ticket Unclaimed\n{member.mention} unclaimed this ticket."
-        )
+        ui.TextDisplay(f"## Ticket Unclaimed\n{member.mention} unclaimed this ticket.")
     )
 
 
 def register_ticket_views(bot: Aspect) -> None:
     panel = AspectLayout(timeout=None)
     panel.add_item(
-        ui.Container(
-            ui.ActionRow(ClaimButton(), UnclaimButton(), CloseButton(), EscalateButton())
-        )
+        ui.Container(ui.ActionRow(ClaimButton(), UnclaimButton(), CloseButton(), EscalateButton()))
     )
     bot.add_view(panel)
 
@@ -484,8 +478,6 @@ class CloseRequest(AspectLayout):
 
 
 class Tickets(commands.Cog):
-    """Support ticket management for Aspect Network."""
-
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
         self._dashboard_id: int | None = None
@@ -516,11 +508,14 @@ class Tickets(commands.Cog):
             return None
         return ticket
 
+    @commands.hybrid_group(  # type: ignore[arg-type]
+        name="ticket",
+        fallback="claim",
+        description="Claim the current support ticket.",
+    )
     @commands.guild_only()
     @commands.cooldown(1, 3, commands.BucketType.user)
-    @commands.hybrid_group(name="ticket", fallback="claim")  # type: ignore[arg-type]
     async def ticket(self, ctx: commands.Context[Any]) -> None:
-        """Claim the current support ticket."""
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member):
             return
@@ -531,10 +526,12 @@ class Tickets(commands.Cog):
         )
         await self.claim_ticket(ctx.channel, ctx.author, reply=ctx, panel=panel)
 
-    @ticket.command(name="add", description="Add a member to the current ticket.")  # type: ignore[arg-type]
+    @ticket.command(  # type: ignore[arg-type]
+        name="add",
+        description="Add a member to the current ticket.",
+    )
     @app_commands.describe(user="Member to add")
     async def add(self, ctx: commands.Context[Any], user: discord.Member) -> None:
-        """Add a member to the current ticket."""
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
             await ctx.warn("You cannot manage tickets.")
@@ -553,10 +550,12 @@ class Tickets(commands.Cog):
         )
         await ctx.approve(f"Added **{user.display_name}** to the ticket.")
 
-    @ticket.command(name="remove", description="Remove a member from the current ticket.")  # type: ignore[arg-type]
+    @ticket.command(  # type: ignore[arg-type]
+        name="remove",
+        description="Remove a member from the current ticket.",
+    )
     @app_commands.describe(user="Member to remove")
     async def remove(self, ctx: commands.Context[Any], user: discord.Member) -> None:
-        """Remove a member from the current ticket."""
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
             await ctx.warn("You cannot manage tickets.")
@@ -570,10 +569,12 @@ class Tickets(commands.Cog):
         await ctx.channel.set_permissions(user, overwrite=None, reason="Removed from ticket")
         await ctx.approve(f"Removed **{user.display_name}** from the ticket.")
 
-    @ticket.command(name="rename", description="Rename the current ticket channel.")  # type: ignore[arg-type]
+    @ticket.command(  # type: ignore[arg-type]
+        name="rename",
+        description="Rename the current ticket channel.",
+    )
     @app_commands.describe(name="New ticket name")
     async def rename(self, ctx: commands.Context[Any], *, name: str) -> None:
-        """Rename the current ticket channel."""
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
             await ctx.warn("You cannot manage tickets.")
@@ -589,9 +590,11 @@ class Tickets(commands.Cog):
         await ctx.channel.edit(name=final, reason=f"Renamed by {ctx.author}")
         await ctx.approve(f"Renamed the ticket to **{final}**.")
 
-    @ticket.command(name="unclaim", description="Unclaim the current support ticket.")  # type: ignore[arg-type]
+    @ticket.command(  # type: ignore[arg-type]
+        name="unclaim",
+        description="Unclaim the current support ticket.",
+    )
     async def unclaim(self, ctx: commands.Context[Any]) -> None:
-        """Unclaim the current support ticket."""
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member):
             return
@@ -602,10 +605,12 @@ class Tickets(commands.Cog):
         )
         await self.unclaim_ticket(ctx.channel, ctx.author, reply=ctx, panel=panel)
 
-    @ticket.command(name="leaderboard", description="Show top support members by claims.")  # type: ignore[arg-type]
+    @ticket.command(  # type: ignore[arg-type]
+        name="leaderboard",
+        description="Show top support members by claims.",
+    )
     @commands.has_permissions(manage_guild=True)
     async def leaderboard(self, ctx: commands.Context[Any]) -> None:
-        """Show top support members by claims."""
         ctx = require_context(ctx)
         rows = await database(self.bot).ticket_leaderboard()
         if not rows:
@@ -620,10 +625,12 @@ class Tickets(commands.Cog):
         view.add_item(ui.Container(ui.TextDisplay("\n".join(lines))))
         await ctx.send(view=view)
 
-    @ticket.command(name="remind", description="Remind the ticket owner their ticket is open.")  # type: ignore[arg-type]
+    @ticket.command(  # type: ignore[arg-type]
+        name="remind",
+        description="Remind the ticket owner their ticket is open.",
+    )
     @commands.cooldown(1, 300, commands.BucketType.channel)
     async def remind(self, ctx: commands.Context[Any]) -> None:
-        """Remind the ticket owner their ticket is open."""
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
             await ctx.warn("You cannot manage tickets.")
@@ -650,9 +657,11 @@ class Tickets(commands.Cog):
             return
         await ctx.approve(f"Reminded **{owner.display_name}**.")
 
-    @ticket.command(name="close", description="Transcript and close the current ticket.")  # type: ignore[arg-type]
+    @ticket.command(  # type: ignore[arg-type]
+        name="close",
+        description="Transcript and close the current ticket.",
+    )
     async def close(self, ctx: commands.Context[Any]) -> None:
-        """Transcript and close the current ticket."""
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
             await ctx.warn("You cannot manage tickets.")
@@ -666,11 +675,13 @@ class Tickets(commands.Cog):
         await ctx.approve("Closing this ticket...")
         await self.close_ticket(ctx, closed_by=ctx.author.id)
 
-    @ticket.command(name="closerequest", description="Ask the owner to confirm closing.")  # type: ignore[arg-type]
+    @ticket.command(  # type: ignore[arg-type]
+        name="closerequest",
+        description="Ask the owner to confirm closing.",
+    )
     @app_commands.describe(reason="Why this ticket should be closed")
     @commands.cooldown(1, 300, commands.BucketType.channel)
     async def closerequest(self, ctx: commands.Context[Any], *, reason: str) -> None:
-        """Ask the owner to confirm closing."""
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
             await ctx.warn("You cannot manage tickets.")
@@ -1080,18 +1091,12 @@ class Tickets(commands.Cog):
         logs = guild.get_channel(Channels.ticket_logs or 0)
         owner = guild.get_member(ticket.owner_id)
         closer = guild.get_member(closed_by)
-        claimed = (
-            guild.get_member(ticket.claimed_by) if ticket.claimed_by is not None else None
-        )
+        claimed = guild.get_member(ticket.claimed_by) if ticket.claimed_by is not None else None
         owner_label = (
-            f"{owner.mention} [`{owner.id}`]"
-            if owner is not None
-            else f"`{ticket.owner_id}`"
+            f"{owner.mention} [`{owner.id}`]" if owner is not None else f"`{ticket.owner_id}`"
         )
         closer_label = (
-            f"{closer.mention} [`{closer.id}`]"
-            if closer is not None
-            else f"`{closed_by}`"
+            f"{closer.mention} [`{closer.id}`]" if closer is not None else f"`{closed_by}`"
         )
         claimed_label = (
             f"{claimed.mention} [`{claimed.id}`]"
@@ -1146,8 +1151,7 @@ class Tickets(commands.Cog):
                 return
         closer_name = closer.display_name if closer is not None else "staff"
         text = (
-            f"## Ticket Closed\n"
-            f"Your ticket `#{ticket.number:03d}` was closed by **{closer_name}**."
+            f"## Ticket Closed\nYour ticket `#{ticket.number:03d}` was closed by **{closer_name}**."
         )
         if url is not None:
             text += f"\n**Transcript:** [View]({url})"

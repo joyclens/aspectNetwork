@@ -14,15 +14,14 @@ class Utility(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
 
-    @commands.guild_only()
-    @commands.has_permissions(administrator=True)
     @commands.hybrid_command(  # type: ignore[arg-type]
         name="say",
-        description="Send a message as the bot",
+        description="Send a message as the bot.",
     )
     @app_commands.describe(message="Text to send in this channel")
+    @commands.guild_only()
+    @commands.has_permissions(administrator=True)
     async def say(self, ctx: commands.Context[Any], *, message: str) -> None:
-        """Send a message as the bot."""
         ctx = require_context(ctx)
         text = message.strip()
         if not text or len(text) > 2000:
