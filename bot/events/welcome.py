@@ -31,9 +31,7 @@ class Welcome(commands.Cog):
             logger.warning("Welcome channel is unavailable")
             return
         count = member.guild.member_count or len(member.guild.members)
-        marketplace = (
-            f"https://discordapp.com/channels/{Guild.id}/{Channels.marketplace}"
-        )
+        marketplace = f"https://discordapp.com/channels/{Guild.id}/{Channels.marketplace}"
         dashboard = f"https://discordapp.com/channels/{Guild.id}/{Channels.dashboard}"
         try:
             await channel.send(

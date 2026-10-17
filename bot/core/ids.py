@@ -40,7 +40,9 @@ class _Secrets:
     postgres_dsn: Final[str] = "postgresql://joyclen:joypasswordlol123@localhost:5432/aspect"
     dock_api_key: Final[str] = "boNoeoHZQVQF.EqY3Pl.v0YH4TCRatvYJfMVYb9YOT5kxOSv"
     dock_pid: Final[str] = "og9OxDwj"
-    cookie_api_key: Final[str] = "sk_root_ry0sAApchKMTNw2Z2gitodIHew4MQswSsGSARENyA1IQ2Jk97CyxdaBllK2Mdh7QoWYFSZFyxvgyGIbPWwKnsi7PrQER1DsW8Nx8bSl1Sof0HGoyOksssj1NnXlzEFyR"
+    cookie_api_key: Final[str] = (
+        "sk_root_ry0sAApchKMTNw2Z2gitodIHew4MQswSsGSARENyA1IQ2Jk97CyxdaBllK2Mdh7QoWYFSZFyxvgyGIbPWwKnsi7PrQER1DsW8Nx8bSl1Sof0HGoyOksssj1NnXlzEFyR"
+    )
 
 
 Secrets = _Secrets()
