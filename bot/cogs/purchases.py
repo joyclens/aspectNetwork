@@ -482,6 +482,10 @@ class Purchases(commands.Cog):
         else:
             logger.warning("Purchase watcher ready, but Roblox is not authenticated yet")
 
+    @watch.error
+    async def watch_error(self, exc: BaseException) -> None:
+        logger.error("Purchase watcher failed", exc_info=exc)
+
 
 async def setup(bot: Aspect) -> None:
     await bot.add_cog(Purchases(bot))

@@ -175,12 +175,8 @@ class Packages(commands.Cog):
             return
         db = database(self.bot)
         now = datetime.now(UTC)
-        try:
-            await db.expire_purchases(now)
-            pending = await db.pending_purchases(now)
-        except Exception as exc:
-            remember_error(self.bot.traceback, exc, where="Package poll")
-            return
+        await db.expire_purchases(now)
+        pending = await db.pending_purchases(now)
         if not pending:
             return
         await self.service.sync_recent_sales()
@@ -198,6 +194,10 @@ class Packages(commands.Cog):
     @poll_purchases.before_loop
     async def before_poll(self) -> None:
         await self.bot.wait_until_ready()
+
+    @poll_purchases.error
+    async def poll_purchases_error(self, exc: BaseException) -> None:
+        remember_error(self.bot.traceback, exc, where="Package poll")
 
 
 async def setup(bot: Aspect) -> None:

@@ -158,9 +158,7 @@ def requirements_text(row: Giveaway) -> str | None:
             f"{Emojis.user_locked} **Required Role:** " + mention_roles(row.required_roles)
         )
     if row.ignore_roles:
-        lines.append(
-            f"{Emojis.user_slash} **Restricted Role:** " + mention_roles(row.ignore_roles)
-        )
+        lines.append(f"{Emojis.user_slash} **Restricted Role:** " + mention_roles(row.ignore_roles))
     return "\n".join(lines) if lines else None
 
 
@@ -239,9 +237,7 @@ def _layout_items(
     items.extend(
         [
             ui.Separator(visible=True),
-            ui.TextDisplay(
-                f"-# {Emojis.person} Giveaway hosted by " + mention_user(row.host_id)
-            ),
+            ui.TextDisplay(f"-# {Emojis.person} Giveaway hosted by " + mention_user(row.host_id)),
         ]
     )
     if ended:
@@ -418,15 +414,16 @@ class Giveaways(commands.Cog):
     async def watch(self) -> None:
         if self.bot.db is None:
             return
-        try:
-            for row in await self.bot.db.expired_giveaways(datetime.now(UTC)):
-                await end_giveaway(self.bot, row)
-        except Exception:
-            logger.exception("Giveaway watcher failed")
+        for row in await self.bot.db.expired_giveaways(datetime.now(UTC)):
+            await end_giveaway(self.bot, row)
 
     @watch.before_loop
     async def before_watch(self) -> None:
         await self.bot.wait_until_ready()
+
+    @watch.error
+    async def watch_error(self, exc: BaseException) -> None:
+        logger.error("Giveaway watcher failed", exc_info=exc)
 
     async def require_giveaway(self, ctx: Ctx, message: discord.Message) -> Giveaway | None:
         reply = require_context(ctx)
