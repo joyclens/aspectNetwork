@@ -6,7 +6,7 @@ import discord
 from discord.ext import commands
 
 from bot.core.bot import Aspect
-from bot.core.ids import Channels, Emojis, Guild
+from bot.core.ids import Channels, Emojis, Guild, Roles
 from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")
@@ -20,6 +20,12 @@ class Welcome(commands.Cog):
     async def on_member_join(self, member: discord.Member) -> None:
         if member.bot or member.guild.id != Guild.id:
             return
+        unverified = member.guild.get_role(Roles.unverified)
+        if unverified is not None and unverified not in member.roles:
+            try:
+                await member.add_roles(unverified, reason="Joined")
+            except discord.HTTPException:
+                logger.warning("Could not grant Unverified to %s", member.id)
         channel = self.bot.get_channel(Channels.welcome)
         if channel is None:
             try:

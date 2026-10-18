@@ -492,18 +492,26 @@ class Verification(commands.Cog):
         return view
 
     async def _grant(self, member: discord.Member) -> None:
-        role_id = Roles.verified
-        if role_id is None:
-            logger.info("Verification finished with no role configured")
-            return
-        role = member.guild.get_role(role_id)
-        if role is None:
-            logger.warning("Verified role is missing")
-            return
-        if role in member.roles:
+        guild = member.guild
+        add: list[discord.Role] = []
+        remove: list[discord.Role] = []
+        for role_id in (Roles.verified, Roles.member):
+            role = guild.get_role(role_id)
+            if role is None:
+                logger.warning("Role %s is missing", role_id)
+                continue
+            if role not in member.roles:
+                add.append(role)
+        unverified = guild.get_role(Roles.unverified)
+        if unverified is not None and unverified in member.roles:
+            remove.append(unverified)
+        if not add and not remove:
             return
         try:
-            await member.add_roles(role, reason="Dock verification")
+            if add:
+                await member.add_roles(*add, reason="Dock verification")
+            if remove:
+                await member.remove_roles(*remove, reason="Dock verification")
         except discord.HTTPException as exc:
             remember_error(self.bot.traceback, exc, where="Verification role")
 

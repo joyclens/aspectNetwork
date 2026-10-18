@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import logging
 import re
 from typing import Any
 
+import aiohttp
 import discord
 from discord import app_commands, ui
 from discord.ext import commands
@@ -1132,6 +1134,22 @@ class Tickets(commands.Cog):
         except discord.HTTPException:
             logger.warning("Could not delete ticket channel %s", channel.id)
 
+    async def _transcript_attachment(self, url: str, number: int) -> discord.File | None:
+        session = self.bot.session
+        if session is None or session.closed:
+            return None
+        try:
+            async with session.get(url) as response:
+                if response.status >= 300:
+                    await response.read()
+                    return None
+                data = await response.read()
+        except (aiohttp.ClientError, OSError, TimeoutError):
+            return None
+        if not data:
+            return None
+        return discord.File(io.BytesIO(data), filename=f"ticket-{number:03d}.html")
+
     async def _dm_owner_closed(
         self,
         ticket: Ticket,
@@ -1145,19 +1163,33 @@ class Tickets(commands.Cog):
                 user = await self.bot.fetch_user(ticket.owner_id)
             except discord.HTTPException:
                 return
-        closer_name = closer.display_name if closer is not None else "staff"
-        text = (
-            f"## Ticket Closed\nYour ticket `#{ticket.number:03d}` was closed by **{closer_name}**."
-        )
-        if url is not None:
-            text += f"\n**Transcript:** [View]({url})"
-        items: list[ui.Item[Any]] = [ui.TextDisplay(text)]
-        if url is not None:
-            items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
         if not isinstance(user, discord.abc.Messageable):
             return
+        staff = closer.mention if closer is not None else "staff"
+        text = (
+            "## Ticket Closed\n"
+            f"Your ticket in **Aspect Network** has been closed by {staff}, "
+            "thank you for contacting us today!\n\n"
+            "If you require any more assistance, please don't hesitate to reach back out "
+            f"via our <#{Channels.dashboard}> channel: you can view your full ticket "
+            "transcript below."
+        )
+        items: list[ui.Item[Any]] = [
+            ui.TextDisplay(text),
+            ui.Separator(visible=False),
+        ]
+        files: list[discord.File] = []
+        if url is not None:
+            uploaded = await self._transcript_attachment(url, ticket.number)
+            if uploaded is not None:
+                items.append(ui.File(uploaded.uri))
+                files.append(uploaded)
+            else:
+                items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
+        items.append(ui.Separator(visible=False))
+        items.append(ui.MediaGallery(discord.MediaGalleryItem(FOOTER)))
         try:
-            await user.send(view=container_view(*items))
+            await user.send(view=container_view(*items), files=files)
         except discord.HTTPException:
             logger.warning("Could not DM ticket owner %s", ticket.owner_id)
 
