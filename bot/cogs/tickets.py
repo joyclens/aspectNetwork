@@ -40,7 +40,6 @@ PACKAGES_BANNER = (
 
 _SLUG = re.compile(r"[^a-z0-9-]+")
 
-
 def channel_slug(value: str) -> str:
     cleaned = _SLUG.sub("-", value.lower().replace(" ", "-")).strip("-")
     return cleaned[:90] or "ticket"
