@@ -272,7 +272,9 @@ class Aspect(commands.Bot):
         self.tree.copy_global_to(guild=guild)
         try:
             synced = await self.tree.sync(guild=guild)
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
         except discord.HTTPException:
             logger.exception("Command sync failed")
             return
-        logger.info("Synced %s commands", len(synced))
+        logger.info("Synced %s guild commands", len(synced))
