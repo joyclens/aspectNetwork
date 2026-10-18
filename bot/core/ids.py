@@ -73,6 +73,13 @@ class Channels:
     package_forum_clothing: Final[int] = 1529150626527711308
     package_forum_development: Final[int] = 1529150869877297242
 
+    advertise_1_199: Final[int] = 1529169511704694965
+    advertise_200_299: Final[int] = 1529170638701596773
+    advertise_300_499: Final[int] = 1529170752618893413
+    advertise_500_999: Final[int] = 1529172038067945543
+    advertise_1000_1999: Final[int] = 1529172146230657206
+    advertise_2000_plus: Final[int] = 1530638295044849684
+
 
 class Roles:
     verified: Final[int] = 1531014387886854204
