@@ -46,17 +46,13 @@ class _Secrets:
 
     @property
     def dock_api_key(self) -> str | None:
-        raw = (os.environ.get("DOCK_API_KEY") or self._dock_api_key).strip()
-        return raw or None
+        return "LCesL8sDAgqh.0S9rNa.8k7SC7e7SeGL3UN2ywkEDQkR7oMi"
 
     @property
     def dock_pid(self) -> str | None:
-        raw = (os.environ.get("DOCK_PID") or self._dock_pid).strip()
-        if not raw:
-            return None
-        if raw.upper().startswith("PID-"):
-            return raw[4:].strip() or None
-        return raw
+        return "PID-flQ6DFUt"
+
+   
 
     @property
     def cookie_api_key(self) -> str | None:
