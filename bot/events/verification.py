@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands
 
 from bot.core.bot import Aspect
-from bot.core.ids import Channels, Emojis, Guild, Roles
+from bot.core.ids import Channels, Emojis, Guild, Roles, Secrets
 from bot.services.dock import DockError, SessionCreated
 from bot.services.roblox import RobloxError
 from bot.shared.errors import remember_error, report_interaction
@@ -221,11 +221,38 @@ class Verification(commands.Cog):
                 ephemeral=True,
             )
             return
-        linked = await dock.linked_roblox(interaction.user.id, guild_id)
+        try:
+            linked = await dock.linked_roblox(interaction.user.id, guild_id)
+        except DockError as exc:
+            logger.error(
+                "Dock linked lookup failed status=%s guild=%s detail=%s",
+                exc.status,
+                guild_id,
+                exc.detail,
+            )
+            await interaction.followup.send(
+                view=container_view(discord.ui.TextDisplay(_UNAVAILABLE)),
+                ephemeral=True,
+            )
+            return
         if linked is not None:
             await self._already(interaction, int(linked))
             return
-        session = await dock.create_session(str(interaction.user.id), guild_id)
+        try:
+            session = await dock.create_session(str(interaction.user.id), guild_id)
+        except DockError as exc:
+            logger.error(
+                "Dock create_session failed status=%s guild=%s pid=%s detail=%s",
+                exc.status,
+                guild_id,
+                Secrets.dock_pid,
+                exc.detail,
+            )
+            await interaction.followup.send(
+                view=container_view(discord.ui.TextDisplay(_UNAVAILABLE)),
+                ephemeral=True,
+            )
+            return
         message = await interaction.followup.send(
             view=container_view(
                 discord.ui.TextDisplay(
@@ -356,7 +383,7 @@ class Verification(commands.Cog):
                     remember_error(self.bot.traceback, exc, where="Button verifyContinue")
                     return
         if member is not None:
-            await self._grant(member)
+            await self._grant(member, username)
 
     async def _watch(
         self,
@@ -385,23 +412,25 @@ class Verification(commands.Cog):
                 if result.discord_id not in {None, str(member.id)}:
                     logger.warning("Dock session finished for a different Discord user")
                     return
-                await self._show_success(message, int(result.roblox_id))
-                await self._grant(member)
+                username = await self._show_success(message, int(result.roblox_id))
+                if username is not None:
+                    await self._grant(member, username)
                 return
             if state.status in {"expired", "cancelled"}:
                 return
         logger.info("Dock session ended before completion")
 
-    async def _show_success(self, message: discord.WebhookMessage, roblox_id: int) -> None:
+    async def _show_success(self, message: discord.WebhookMessage, roblox_id: int) -> str | None:
         try:
             username, emoji = await self._portrait(roblox_id)
         except RobloxError as exc:
             remember_error(self.bot.traceback, exc, where="Verification")
-            return
+            return None
         try:
             await message.edit(view=self._success_view(username, roblox_id, emoji))
         except discord.HTTPException as exc:
             remember_error(self.bot.traceback, exc, where="Verification")
+        return username
 
     async def _portrait(self, roblox_id: int) -> tuple[str, str]:
         roblox = self.bot.roblox
@@ -491,7 +520,7 @@ class Verification(commands.Cog):
         )
         return view
 
-    async def _grant(self, member: discord.Member) -> None:
+    async def _grant(self, member: discord.Member, username: str) -> None:
         guild = member.guild
         add: list[discord.Role] = []
         remove: list[discord.Role] = []
@@ -505,8 +534,6 @@ class Verification(commands.Cog):
         unverified = guild.get_role(Roles.unverified)
         if unverified is not None and unverified in member.roles:
             remove.append(unverified)
-        if not add and not remove:
-            return
         try:
             if add:
                 await member.add_roles(*add, reason="Dock verification")
@@ -514,6 +541,13 @@ class Verification(commands.Cog):
                 await member.remove_roles(*remove, reason="Dock verification")
         except discord.HTTPException as exc:
             remember_error(self.bot.traceback, exc, where="Verification role")
+        nick = " ".join(username.split())[:32]
+        if not nick or member.nick == nick:
+            return
+        try:
+            await member.edit(nick=nick, reason="Dock verification")
+        except discord.HTTPException:
+            logger.warning("Could not nickname %s to %s", member.id, nick)
 
 
 async def setup(bot: Aspect) -> None:

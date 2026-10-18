@@ -13,10 +13,18 @@ _SID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123
 
 
 class DockError(Exception):
-    def __init__(self, status: int, retry_after: float | None = None) -> None:
+    def __init__(
+        self,
+        status: int,
+        retry_after: float | None = None,
+        *,
+        detail: str | None = None,
+    ) -> None:
         self.status = status
         self.retry_after = retry_after
-        super().__init__(f"dock status {status}")
+        self.detail = detail
+        suffix = f" {detail}" if detail else ""
+        super().__init__(f"dock status {status}{suffix}")
 
 
 class SessionCreated(BaseModel):
@@ -149,14 +157,28 @@ class Dock:
                 if response.status == 429:
                     retry = body.get("retryAfter")
                     delay = float(retry) if isinstance(retry, int | float) else None
-                    raise DockError(429, delay)
+                    raise DockError(429, delay, detail=_error_detail(body))
                 if response.status >= 400:
-                    raise DockError(response.status)
+                    raise DockError(response.status, detail=_error_detail(body))
                 return body
         except aiohttp.ClientError as exc:
             raise DockError(0) from exc
         except TimeoutError as exc:
             raise DockError(0) from exc
+
+
+def _error_detail(body: dict[str, Any]) -> str | None:
+    error = body.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        code = error.get("code")
+        parts = [str(part) for part in (code, message) if isinstance(part, str) and part.strip()]
+        if parts:
+            return ": ".join(parts)
+    message = body.get("message")
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    return None
 
 
 async def _json_or_empty(response: aiohttp.ClientResponse) -> dict[str, Any]:

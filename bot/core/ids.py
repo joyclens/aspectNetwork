@@ -38,11 +38,30 @@ class _Secrets:
         return (os.environ.get("ROBLOX_API_KEY") or self._roblox_api_key).strip()
 
     postgres_dsn: Final[str] = "postgresql://joyclen:joypasswordlol123@localhost:5432/aspect"
-    dock_api_key: Final[str] = "boNoeoHZQVQF.EqY3Pl.v0YH4TCRatvYJfMVYb9YOT5kxOSv"
-    dock_pid: Final[str] = "og9OxDwj"
-    cookie_api_key: Final[str] = (
+    _dock_api_key: Final[str] = "LCesL8sDAgqh.0S9rNa.8k7SC7e7SeGL3UN2ywkEDQkR7oMi"
+    _dock_pid: Final[str] = "PID-flQ6DFUt"
+    _cookie_api_key: Final[str] = (
         "sk_root_ry0sAApchKMTNw2Z2gitodIHew4MQswSsGSARENyA1IQ2Jk97CyxdaBllK2Mdh7QoWYFSZFyxvgyGIbPWwKnsi7PrQER1DsW8Nx8bSl1Sof0HGoyOksssj1NnXlzEFyR"
     )
+
+    @property
+    def dock_api_key(self) -> str | None:
+        raw = (os.environ.get("DOCK_API_KEY") or self._dock_api_key).strip()
+        return raw or None
+
+    @property
+    def dock_pid(self) -> str | None:
+        raw = (os.environ.get("DOCK_PID") or self._dock_pid).strip()
+        if not raw:
+            return None
+        if raw.upper().startswith("PID-"):
+            return raw[4:].strip() or None
+        return raw
+
+    @property
+    def cookie_api_key(self) -> str | None:
+        raw = (os.environ.get("COOKIE_API_KEY") or self._cookie_api_key).strip()
+        return raw or None
 
 
 Secrets = _Secrets()
@@ -52,6 +71,7 @@ class App:
     command_prefix: Final[str] = "!"
     roblox_group_id: Final[int] = 719648172
     roblox_universe_id: Final[int] = 8848357152
+
 
 class Guild:
     id: Final[int] = 1529135675318866020

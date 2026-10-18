@@ -255,6 +255,7 @@ class Aspect(commands.Bot):
             return
         self.dock = Dock(key, pid, self.session)
         await self.dock.start()
+        logger.info("Dock verification ready pid=%s guild=%s", pid, Guild.id)
 
     async def _start_cookie(self) -> None:
         key = Secrets.cookie_api_key
