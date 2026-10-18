@@ -53,7 +53,6 @@ class App:
     roblox_group_id: Final[int] = 719648172
     roblox_universe_id: Final[int] = 8848357152
 
-
 class Guild:
     id: Final[int] = 1529135675318866020
 
