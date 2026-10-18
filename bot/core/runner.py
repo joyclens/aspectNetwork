@@ -7,7 +7,7 @@ from contextlib import suppress
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
-from bot.core import identity as _identity  # noqa: F401
+import bot.core.identity  # noqa: F401
 from bot.core.bot import Aspect
 from bot.core.config import Settings, load_settings
 from bot.core.ids import Secrets

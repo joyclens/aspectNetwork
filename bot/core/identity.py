@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
+
 from discord.gateway import DiscordWebSocket
 
-async def identify(self):
-    payload = {
+
+async def identify(self: DiscordWebSocket) -> None:
+    payload: dict[str, Any] = {
         "op": self.IDENTIFY,
         "d": {
             "token": self.token,
@@ -23,7 +26,6 @@ async def identify(self):
         payload["d"]["shard"] = [self.shard_id, self.shard_count]
 
     state = self._connection
-
     if state._activity is not None or state._status is not None:
         payload["d"]["presence"] = {
             "status": state._status,
@@ -35,9 +37,8 @@ async def identify(self):
     if state._intents is not None:
         payload["d"]["intents"] = state._intents.value
 
-    await self.call_hooks(
-        "before_identify", self.shard_id, initial=self._initial_identify
-    )
+    await self.call_hooks("before_identify", self.shard_id, initial=self._initial_identify)
     await self.send_as_json(payload)
+
 
 DiscordWebSocket.identify = identify  # type: ignore[method-assign]
