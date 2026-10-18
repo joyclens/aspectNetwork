@@ -72,9 +72,6 @@ class Adverts(commands.Cog):
             return
         if message.channel.id not in ADVERT_CHANNELS:
             return
-        if isinstance(message.author, discord.Member):
-            if message.author.guild_permissions.manage_messages:
-                return
 
         channel = message.channel
         if not isinstance(channel, discord.TextChannel):
