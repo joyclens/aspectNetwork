@@ -9,7 +9,6 @@ from discord.ext import commands
 from bot.core.bot import Aspect
 from bot.shared.context import require_context
 
-
 class Utility(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
