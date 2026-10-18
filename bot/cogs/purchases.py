@@ -192,12 +192,15 @@ class Purchases(commands.Cog):
     async def cog_unload(self) -> None:
         self.watch.cancel()
 
+    @commands.hybrid_group(  # type: ignore[arg-type]
+        name="purchases",
+        fallback="recent",
+        description="Show the most recent store purchase.",
+    )
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
     @commands.cooldown(1, 5, commands.BucketType.user)
-    @commands.hybrid_group(name="purchases", fallback="recent")  # type: ignore[arg-type]
     async def purchases(self, ctx: commands.Context[Any]) -> None:
-        """Show the most recent store purchase."""
         ctx = require_context(ctx)
         sale = await database(self.bot).recent_sale(App.roblox_group_id)
         if sale is None:
@@ -245,10 +248,13 @@ class Purchases(commands.Cog):
         )
         await ctx.send(view=view)
 
-    @purchases.command(name="history")  # type: ignore[arg-type]
+    @purchases.command(  # type: ignore[arg-type]
+        name="history",
+        description="Show a member's past store purchases.",
+    )
     @app_commands.describe(user="Discord member whose linked Roblox purchases to show")
+    @commands.has_permissions(manage_guild=True)
     async def history(self, ctx: commands.Context[Any], user: discord.Member) -> None:
-        """Show a member's past store purchases."""
         ctx = require_context(ctx)
         db = database(self.bot)
         if self.bot.dock is None:
@@ -272,9 +278,12 @@ class Purchases(commands.Cog):
             return
         await ctx.send(view=History(ctx.author.id, sales))
 
-    @purchases.command(name="highest")  # type: ignore[arg-type]
+    @purchases.command(  # type: ignore[arg-type]
+        name="highest",
+        description="Show the highest store purchase.",
+    )
+    @commands.has_permissions(manage_guild=True)
     async def highest(self, ctx: commands.Context[Any]) -> None:
-        """Show the highest store purchase."""
         ctx = require_context(ctx)
         sale = await database(self.bot).highest_sale(App.roblox_group_id)
         if sale is None:
@@ -322,10 +331,13 @@ class Purchases(commands.Cog):
         )
         await ctx.send(view=view)
 
-    @purchases.command(name="time")  # type: ignore[arg-type]
+    @purchases.command(  # type: ignore[arg-type]
+        name="time",
+        description="Show purchase stats for a timeframe.",
+    )
     @app_commands.describe(timeframe="Weekly, Monthly, Yearly, this month, All Time, or a year")
+    @commands.has_permissions(manage_guild=True)
     async def time(self, ctx: commands.Context[Any], timeframe: str) -> None:
-        """Show purchase stats for a timeframe."""
         ctx = require_context(ctx)
         choice = timeframe.strip()
         if len(choice) > 32:
@@ -481,6 +493,10 @@ class Purchases(commands.Cog):
             )
         else:
             logger.warning("Purchase watcher ready, but Roblox is not authenticated yet")
+
+    @watch.error
+    async def watch_error(self, exc: BaseException) -> None:
+        logger.error("Purchase watcher failed", exc_info=exc)
 
 
 async def setup(bot: Aspect) -> None:

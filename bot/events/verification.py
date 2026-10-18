@@ -18,9 +18,7 @@ from bot.shared.layout import AspectLayout, container_view
 
 logger = logging.getLogger("aspect")
 
-_UNAVAILABLE = (
-    "**Sorry!** We're currently undergoing maintenance, please try again later."
-)
+_UNAVAILABLE = "**Sorry!** We're currently undergoing maintenance, please try again later."
 
 
 def _emoji_id(token: str) -> int | None:
@@ -62,11 +60,7 @@ class VerifyButton(discord.ui.Button[Any]):
             if not isinstance(cog, Verification):
                 logger.error("Verification cog is not loaded")
                 await interaction.followup.send(
-                    view=container_view(
-                        discord.ui.TextDisplay(
-                            _UNAVAILABLE
-                        )
-                    ),
+                    view=container_view(discord.ui.TextDisplay(_UNAVAILABLE)),
                     ephemeral=True,
                 )
                 return
@@ -131,11 +125,7 @@ class _Continue(discord.ui.Button[Any]):
                 logger.error("Verification cog is not loaded")
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        view=container_view(
-                            discord.ui.TextDisplay(
-                                _UNAVAILABLE
-                            )
-                        ),
+                        view=container_view(discord.ui.TextDisplay(_UNAVAILABLE)),
                         ephemeral=True,
                     )
                 return
@@ -219,11 +209,7 @@ class Verification(commands.Cog):
                 Guild.id,
             )
             await interaction.followup.send(
-                view=container_view(
-                    discord.ui.TextDisplay(
-                        _UNAVAILABLE
-                    )
-                ),
+                view=container_view(discord.ui.TextDisplay(_UNAVAILABLE)),
                 ephemeral=True,
             )
             return
@@ -231,11 +217,7 @@ class Verification(commands.Cog):
         if dock is None or self.bot.roblox is None:
             logger.error("Verification services are not ready")
             await interaction.followup.send(
-                view=container_view(
-                    discord.ui.TextDisplay(
-                        _UNAVAILABLE
-                    )
-                ),
+                view=container_view(discord.ui.TextDisplay(_UNAVAILABLE)),
                 ephemeral=True,
             )
             return
@@ -349,11 +331,7 @@ class Verification(commands.Cog):
                 interaction.guild_id,
                 Guild.id,
             )
-            notice = container_view(
-                discord.ui.TextDisplay(
-                    _UNAVAILABLE
-                )
-            )
+            notice = container_view(discord.ui.TextDisplay(_UNAVAILABLE))
             if interaction.response.is_done():
                 await interaction.followup.send(view=notice, ephemeral=True)
             else:

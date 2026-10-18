@@ -158,9 +158,7 @@ def requirements_text(row: Giveaway) -> str | None:
             f"{Emojis.user_locked} **Required Role:** " + mention_roles(row.required_roles)
         )
     if row.ignore_roles:
-        lines.append(
-            f"{Emojis.user_slash} **Restricted Role:** " + mention_roles(row.ignore_roles)
-        )
+        lines.append(f"{Emojis.user_slash} **Restricted Role:** " + mention_roles(row.ignore_roles))
     return "\n".join(lines) if lines else None
 
 
@@ -199,6 +197,10 @@ class LeaveView(ui.View):
     @ui.button(label="Leave the Giveaway", style=discord.ButtonStyle.danger)
     async def leave(self, interaction: Interaction, _button: ui.Button[Any]) -> None:
         if interaction.guild_id is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("You cannot leave this giveaway here.")),
+                ephemeral=True,
+            )
             return
         await interaction.response.defer(ephemeral=True)
         db = database(self.bot)
@@ -206,8 +208,10 @@ class LeaveView(ui.View):
         if row is None:
             await reply(interaction, "This giveaway does not exist or has been removed.")
             return
-        members = [user_id for user_id in row.members if user_id != self.member_id]
-        await db.set_giveaway_members(self.message.id, members)
+        members = await db.remove_giveaway_member(self.message.id, self.member_id)
+        if members is None:
+            await reply(interaction, "This giveaway does not exist or has been removed.")
+            return
         await edit_giveaway(self.bot, self.message, replace(row, members=members))
         await reply(interaction, "You left the giveaway.")
 
@@ -239,9 +243,7 @@ def _layout_items(
     items.extend(
         [
             ui.Separator(visible=True),
-            ui.TextDisplay(
-                f"-# {Emojis.person} Giveaway hosted by " + mention_user(row.host_id)
-            ),
+            ui.TextDisplay(f"-# {Emojis.person} Giveaway hosted by " + mention_user(row.host_id)),
         ]
     )
     if ended:
@@ -302,15 +304,26 @@ async def show_participants(interaction: Interaction, *, ended: bool) -> None:
     client = await client_of(interaction)
     message = interaction.message
     if client is None or message is None:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("This giveaway is unavailable.")),
+                ephemeral=True,
+            )
+        return
+    if not ended and interaction.guild is None:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("This giveaway is unavailable.")),
+                ephemeral=True,
+            )
         return
     if not interaction.response.is_done():
         await interaction.response.defer(ephemeral=True)
     db = database(client)
     if ended:
         members = await db.ended_giveaway(message.channel.id, message.id)
-    elif interaction.guild is None:
-        return
     else:
+        assert interaction.guild is not None
         row = await db.giveaway(interaction.guild.id, message.id)
         members = None if row is None else row.members
     if members is None:
@@ -336,6 +349,11 @@ async def handle_join(interaction: Interaction) -> None:
         or message is None
         or not isinstance(member, discord.Member)
     ):
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("You cannot join this giveaway here.")),
+                ephemeral=True,
+            )
         return
     if not interaction.response.is_done():
         await interaction.response.defer(ephemeral=True)
@@ -354,8 +372,14 @@ async def handle_join(interaction: Interaction) -> None:
             ephemeral=True,
         )
         return
-    members = [*row.members, member.id]
-    await db.set_giveaway_members(message.id, members)
+    members = await db.add_giveaway_member(message.id, member.id)
+    if members is None:
+        await interaction.followup.send(
+            "You are already in this giveaway.",
+            view=LeaveView(client, message, member.id),
+            ephemeral=True,
+        )
+        return
     await edit_giveaway(client, message, replace(row, members=members))
     text = "You joined the giveaway."
     if reminder := server_reminder(row):
@@ -418,15 +442,20 @@ class Giveaways(commands.Cog):
     async def watch(self) -> None:
         if self.bot.db is None:
             return
-        try:
-            for row in await self.bot.db.expired_giveaways(datetime.now(UTC)):
-                await end_giveaway(self.bot, row)
-        except Exception:
-            logger.exception("Giveaway watcher failed")
+        now = datetime.now(UTC)
+        while True:
+            row = await self.bot.db.take_expired_giveaway(now)
+            if row is None:
+                break
+            await end_giveaway(self.bot, row)
 
     @watch.before_loop
     async def before_watch(self) -> None:
         await self.bot.wait_until_ready()
+
+    @watch.error
+    async def watch_error(self, exc: BaseException) -> None:
+        logger.error("Giveaway watcher failed", exc_info=exc)
 
     async def require_giveaway(self, ctx: Ctx, message: discord.Message) -> Giveaway | None:
         reply = require_context(ctx)

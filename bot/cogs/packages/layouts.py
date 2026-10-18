@@ -9,7 +9,7 @@ from bot.cogs.packages.constants import PACKAGE_BANNER_URL, SELL_LABELS
 from bot.cogs.packages.media import is_image
 from bot.cogs.packages.models import neutralise_fences
 from bot.core.database import Package, PackagerPackageEarnings
-from bot.core.ids import Guild
+from bot.core.ids import Emojis, Guild
 from bot.shared.layout import AspectLayout
 
 MediaRef = tuple[str, str | None]
@@ -178,8 +178,7 @@ def _package_jump(row: PackagerPackageEarnings) -> str:
         return f"**{title}**"
     if row.forum_message_id is not None:
         url = (
-            f"https://discord.com/channels/{Guild.id}/"
-            f"{row.forum_thread_id}/{row.forum_message_id}"
+            f"https://discord.com/channels/{Guild.id}/{row.forum_thread_id}/{row.forum_message_id}"
         )
     else:
         url = f"https://discord.com/channels/{Guild.id}/{row.forum_thread_id}"
@@ -193,17 +192,20 @@ def payouts_layout(
     pending_only: bool = False,
 ) -> AspectLayout:
     pending_total = sum(row.pending_total for row in rows)
-    header = (
-        "## Pending Payouts\n"
-        f"<@{packager_id}> has a total of **{pending_total:,}** <:robux:1559293111329619991> pending."
-        if pending_only
-        else (
-            "## Package Earnings\n"
-            f"<@{packager_id}> - pending <:robux:1559293111329619991> **{pending_total:,}** · "
-            f"paid <:robux:1559293111329619991> **{sum(row.paid_total for row in rows):,}** · "
-            f"**{sum(row.sales for row in rows)}** sale(s)."
+    paid_total = sum(row.paid_total for row in rows)
+    sales_total = sum(row.sales for row in rows)
+    robux = Emojis.robux
+    if pending_only:
+        header = (
+            "## Pending Payouts\n"
+            f"<@{packager_id}> has a total of **{pending_total:,}** {robux} pending."
         )
-    )
+    else:
+        header = (
+            "## Package Earnings\n"
+            f"<@{packager_id}> - pending {robux} **{pending_total:,}** · "
+            f"paid {robux} **{paid_total:,}** · **{sales_total}** sale(s)."
+        )
     items: list[ui.Item[Any]] = [
         ui.TextDisplay(header),
         ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
@@ -214,17 +216,16 @@ def payouts_layout(
         lines.append("-# No packages to show.")
     else:
         for index, row in enumerate(visible[:25], start=1):
+            jump = _package_jump(row)
             if pending_only:
                 lines.append(
-                    f"`{index}.` {_package_jump(row)} - "
-                    f"<:robux:1559293111329619991> **{row.pending_total:,}** pending "
+                    f"`{index}.` {jump} - {robux} **{row.pending_total:,}** pending "
                     f"(`{row.pending_sales}` sale(s))."
                 )
             else:
                 lines.append(
-                    f"`{index}.` {_package_jump(row)} - "
-                    f"<:robux:1559293111329619991> **{row.earned:,}** earned · `{row.sales}` sale(s) · "
-                    f"<:robux:1559293111329619991> **{row.pending_total:,}** pending."
+                    f"`{index}.` {jump} - {robux} **{row.earned:,}** earned · "
+                    f"`{row.sales}` sale(s) · {robux} **{row.pending_total:,}** pending."
                 )
     items.append(ui.TextDisplay("\n".join(lines)))
     items.append(ui.Separator(visible=False))

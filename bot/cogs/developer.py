@@ -20,15 +20,18 @@ class Developer(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
 
-    @commands.is_owner()
-    @commands.hybrid_command(name="traceback", aliases=("trace", "error"))  # type: ignore[arg-type]
+    @commands.hybrid_command(  # type: ignore[arg-type]
+        name="traceback",
+        aliases=("trace", "error"),
+        description="Show a stored traceback by error code.",
+    )
     @app_commands.describe(error_code="Error code from a failed command or button")
+    @commands.is_owner()
     async def traceback(
         self,
         ctx: commands.Context[Any],
         error_code: str | None = None,
     ) -> None:
-        """Show a stored traceback."""
         ctx = require_context(ctx)
         code = error_code
         if code is None:

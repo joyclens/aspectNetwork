@@ -412,7 +412,7 @@ class PackageService:
         try:
             await ingest()
         except Exception:
-            logger.warning("Could not refresh group sales for package payment check")
+            logger.exception("Could not refresh group sales for package payment check")
 
     async def buyer_paid(
         self,

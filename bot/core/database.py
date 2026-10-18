@@ -463,17 +463,25 @@ class Database:
             reason,
         )
 
-    async def claim_ticket(self, channel_id: int, user_id: int) -> None:
-        await self._pool.execute(
-            "UPDATE tickets SET claimed_by = $1 WHERE channel_id = $2",
+    async def claim_ticket(self, channel_id: int, user_id: int) -> bool:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE tickets
+            SET claimed_by = $1
+            WHERE channel_id = $2 AND claimed_by IS NULL
+            RETURNING channel_id
+            """,
             user_id,
             channel_id,
         )
+        if row is None:
+            return False
         await self._pool.execute(
             "INSERT INTO ticket_claims (user_id, channel_id) VALUES ($1, $2)",
             user_id,
             channel_id,
         )
+        return True
 
     async def unclaim_ticket(self, channel_id: int) -> None:
         await self._pool.execute(
@@ -510,18 +518,6 @@ class Database:
         )
         return _giveaway(row) if row else None
 
-    async def giveaway_by_message(self, message_id: int) -> Giveaway | None:
-        row = await self._pool.fetchrow(
-            """
-            SELECT message_id, guild_id, channel_id, winners, members, finish, host_id,
-                   title, required_roles, ignore_roles, required_servers
-            FROM giveaways
-            WHERE message_id = $1
-            """,
-            message_id,
-        )
-        return _giveaway(row) if row else None
-
     async def giveaways(self, guild_id: int) -> list[Giveaway]:
         rows = await self._pool.fetch(
             """
@@ -542,17 +538,23 @@ class Database:
         )
         return int(value or 0)
 
-    async def expired_giveaways(self, now: datetime) -> list[Giveaway]:
-        rows = await self._pool.fetch(
+    async def take_expired_giveaway(self, now: datetime) -> Giveaway | None:
+        row = await self._pool.fetchrow(
             """
-            SELECT message_id, guild_id, channel_id, winners, members, finish, host_id,
-                   title, required_roles, ignore_roles, required_servers
-            FROM giveaways
-            WHERE finish <= $1
+            DELETE FROM giveaways
+            WHERE ctid = (
+                SELECT ctid FROM giveaways
+                WHERE finish <= $1
+                ORDER BY finish ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING message_id, guild_id, channel_id, winners, members, finish, host_id,
+                      title, required_roles, ignore_roles, required_servers
             """,
             now,
         )
-        return [_giveaway(row) for row in rows]
+        return _giveaway(row) if row else None
 
     async def create_giveaway(
         self,
@@ -596,6 +598,37 @@ class Database:
             json.dumps(members),
             message_id,
         )
+
+    async def add_giveaway_member(self, message_id: int, user_id: int) -> list[int] | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE giveaways
+            SET members = members || $1::jsonb
+            WHERE message_id = $2
+              AND NOT (members @> $1::jsonb)
+            RETURNING members
+            """,
+            json.dumps([user_id]),
+            message_id,
+        )
+        return _member_ids(row["members"]) if row else None
+
+    async def remove_giveaway_member(self, message_id: int, user_id: int) -> list[int] | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE giveaways
+            SET members = COALESCE((
+                SELECT jsonb_agg(value)
+                FROM jsonb_array_elements(members) AS value
+                WHERE value <> to_jsonb($1::bigint)
+            ), '[]'::jsonb)
+            WHERE message_id = $2
+            RETURNING members
+            """,
+            user_id,
+            message_id,
+        )
+        return _member_ids(row["members"]) if row else None
 
     async def set_giveaway_title(self, message_id: int, title: str) -> None:
         await self._pool.execute(

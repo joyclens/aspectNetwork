@@ -43,11 +43,7 @@ def _discover(folder: str) -> list[str]:
         if path.name != "__init__.py" and not path.name.startswith("_")
     ]
     for path in sorted(root.iterdir()):
-        if (
-            path.is_dir()
-            and not path.name.startswith("_")
-            and (path / "__init__.py").is_file()
-        ):
+        if path.is_dir() and not path.name.startswith("_") and (path / "__init__.py").is_file():
             modules.append(f"bot.{folder}.{path.name}")
     return modules
 

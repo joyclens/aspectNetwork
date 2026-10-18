@@ -95,9 +95,11 @@ def test_normalize_cookie_keeps_warning_prefix() -> None:
         "_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-as-you"
         "-and-to-steal-your-ROBUX-and-items.|_CAEQAhoGCAIQBBgBIh"
     )
-    assert normalize_cookie(raw) == raw
-    assert normalize_cookie(f".ROBLOSECURITY={raw}") == raw
-    assert normalize_cookie(f'"{raw}"') == raw
+    expected = f".ROBLOSECURITY={raw}"
+    assert normalize_cookie(raw) == expected
+    assert normalize_cookie(expected) == expected
+    assert normalize_cookie(f'"{raw}"') == expected
+    assert normalize_cookie(f"ROBLOSECURITY={raw}") == expected
 
 
 def test_history_paginates_only_past_five() -> None:

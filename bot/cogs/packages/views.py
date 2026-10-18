@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -22,6 +23,7 @@ from bot.shared.errors import report_interaction
 from bot.shared.layout import container_view
 
 Interaction = discord.Interaction[Any]
+logger = logging.getLogger("aspect")
 
 
 def _service(interaction: Interaction) -> Any:
@@ -85,6 +87,10 @@ class DraftContinue(ui.Button[Any]):
             return
         service = _service(interaction)
         if service is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         from bot.cogs.packages.modals import FilesModal, MetaModal
 
@@ -121,7 +127,7 @@ class DraftContinue(ui.Button[Any]):
                         attachments=interaction.message.attachments,
                     )
                 except discord.HTTPException:
-                    pass
+                    logger.warning("Could not mark package draft as submitting")
             try:
                 package = await service.submit_final(interaction, draft)
             except Exception as exc:
@@ -131,7 +137,7 @@ class DraftContinue(ui.Button[Any]):
                         restore, files = build_draft_view(self.user_id, 3, draft)
                         await interaction.message.edit(view=restore, attachments=files)
                     except discord.HTTPException:
-                        pass
+                        logger.warning("Could not restore package draft after submit failure")
                 await report_interaction(interaction, exc, where="Package submit")
                 return
             service.end_submit(self.user_id)
@@ -141,9 +147,8 @@ class DraftContinue(ui.Button[Any]):
             if interaction.message is not None:
                 try:
                     await interaction.message.edit(view=done, attachments=[])
-                    return
                 except discord.HTTPException:
-                    pass
+                    logger.warning("Could not update package draft after submit")
             await interaction.followup.send(view=done, ephemeral=True)
 
 
@@ -193,6 +198,10 @@ class ApproveButton(ui.DynamicItem[ui.Button[Any]], template=APPROVE_TEMPLATE):
     async def callback(self, interaction: Interaction) -> None:
         service = _service(interaction)
         if service is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -237,6 +246,10 @@ class DenyButton(ui.DynamicItem[ui.Button[Any]], template=DENY_TEMPLATE):
 
         service = _service(interaction)
         if service is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         if not isinstance(interaction.user, discord.Member) or not service.is_management(
             interaction.user
@@ -324,12 +337,20 @@ class ResendButton(ui.DynamicItem[ui.Button[Any]], template=RESEND_TEMPLATE):
     async def callback(self, interaction: Interaction) -> None:
         service = _service(interaction)
         if service is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         await interaction.response.defer(ephemeral=True)
         from bot.shared.checks import database
 
         client = interaction.client
         if not isinstance(client, Aspect):
+            await interaction.followup.send(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         db = database(client)
         purchase = await db.purchase(self.purchase_id)
@@ -350,6 +371,10 @@ class ResendButton(ui.DynamicItem[ui.Button[Any]], template=RESEND_TEMPLATE):
             return
         package = await db.package(purchase.package_id)
         if package is None:
+            await interaction.followup.send(
+                view=container_view(ui.TextDisplay("Package not found.")),
+                ephemeral=True,
+            )
             return
         ok = await service.deliver_files(purchase, package)
         if ok:

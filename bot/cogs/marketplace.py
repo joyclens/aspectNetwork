@@ -14,12 +14,9 @@ from bot.shared.layout import AspectLayout, container_view
 logger = logging.getLogger("aspect")
 
 MARKETPLACE_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/"
-    "1553891840795742268/marketplace.png"
+    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891840795742268/marketplace.png"
 )
-FOOTER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
-)
+FOOTER = "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
 
 _SMALL = discord.SeparatorSpacing.small
 
@@ -83,9 +80,7 @@ def tos_view() -> AspectLayout:
         ui.Container(
             ui.MediaGallery(discord.MediaGalleryItem(MARKETPLACE_BANNER)),
             ui.Separator(visible=False, spacing=_SMALL),
-            ui.TextDisplay(
-                f"## {Emojis.regulations} **Aspect Marketplace Terms of Service**"
-            ),
+            ui.TextDisplay(f"## {Emojis.regulations} **Aspect Marketplace Terms of Service**"),
             ui.Separator(visible=True, spacing=_SMALL),
             ui.TextDisplay(
                 "**Refunds**\n"
