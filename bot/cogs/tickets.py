@@ -20,34 +20,22 @@ from bot.shared.layout import AspectLayout, container_view
 logger = logging.getLogger("aspect")
 
 FOOTER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/"
-    "1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png"
-    "?ex=6acf58a0&is=6ace0720&hm=4b79fc195d2f294319e01d01a76782756319a8d26e95abc78e1aed22d3db5ecd&"
+    "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png?ex=6ad54760&is=6ad3f5e0&hm=a620cfc6a45f8943e51320363b156c32491524ee8f70116a5cc52fa43faa96c3&"
 )
 DASHBOARD_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/"
-    "1553891838950375454/dashboard.png"
-    "?ex=6acf554c&is=6ace03cc&hm=7bae21e2c184f04e878d8e4d291bb5bdb33814d38fa3592780167289c57bbb75&"
+    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891838950375454/dashboard.png?ex=6ad5440c&is=6ad3f28c&hm=72c2679975b0d1a9a4edd0991deefecdea82a8a178140c56d92e910056e2f90a&"
 )
 SUPPORT_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/"
-    "1553891882709291130/support.png"
-    "?ex=6acf5556&is=6ace03d6&hm=9a6006135f4301c18eeb5247356b40ce1f7b65239696d96c84bbe6c9431b2b63&"
+    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891882709291130/support.png?ex=6ad54416&is=6ad3f296&hm=9960a0f7ad85b6bf03112fecbcf4e5c84fc828d2db653dce1ef1728185f76974&"
 )
 TICKET_FOOTER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/"
-    "1553891965811167284/image.png"
-    "?ex=6acf556a&is=6ace03ea&hm=beb8934539bf5ab14f57905a39aaf4931ebec696e60f0f58d949b50fd796c0ad&"
+    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891965811167284/image.png?ex=6ad54426&is=6ad3f2a6&hm=c4808253258490508f4836343b232812a3b49b6481f56598527c6c4591818085&"
 )
 REGULATIONS_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/"
-    "1553891837926838322/regulations.png"
-    "?ex=6acf554c&is=6ace03cc&hm=a343f05ec299ef049efbe10b6384eab3769e2324227af4b8a766e5b46bd8fb4c&"
+    "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png?ex=6ad54760&is=6ad3f5e0&hm=a620cfc6a45f8943e51320363b156c32491524ee8f70116a5cc52fa43faa96c3&"
 )
 PACKAGES_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/"
-    "1553891841181622362/packages.png"
-    "?ex=6acf554c&is=6ace03cc&hm=36294664a41021a89b3a9bb6257e67f97df102a981ef08081eb8dc86fa69538e&"
+    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891841181622362/packages.png?ex=6ad5440c&is=6ad3f28c&hm=c14adb4890683dbf81532b1a986ba58fce6cabf4ef2719957d988bfb0d362a7b&"
 )
 
 _SLUG = re.compile(r"[^a-z0-9-]+")
