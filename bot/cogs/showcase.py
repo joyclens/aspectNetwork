@@ -174,7 +174,7 @@ class Showcase(commands.Cog):
                 ephemeral=True,
             )
             return
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
         cookie = self.bot.settings.roblox_cookie.get_secret_value()
         try:
             shirt_data, pants_data = await asyncio.gather(
@@ -191,9 +191,7 @@ class Showcase(commands.Cog):
             logger.warning("Showcase template failed for %s: %s", exc.clothing_id, exc.detail)
             await interaction.followup.send(
                 view=container_view(
-                    discord.ui.TextDisplay(
-                        f"Could not fetch clothing `{exc.clothing_id}` - {exc.detail}."
-                    )
+                    discord.ui.TextDisplay("Could not fetch one of those clothing templates.")
                 ),
                 ephemeral=True,
             )
@@ -207,12 +205,31 @@ class Showcase(commands.Cog):
                 ephemeral=True,
             )
             return
+        channel = interaction.channel
+        if not isinstance(channel, discord.abc.Messageable):
+            await interaction.followup.send(
+                view=container_view(discord.ui.TextDisplay("This channel cannot receive files.")),
+                ephemeral=True,
+            )
+            return
         uploaded = discord.File(io.BytesIO(preview), filename="showcase.png")
+        try:
+            await channel.send(
+                view=container_view(
+                    discord.ui.MediaGallery(discord.MediaGalleryItem(uploaded.uri)),
+                ),
+                files=[uploaded],
+            )
+        except discord.HTTPException:
+            logger.exception("Showcase channel post failed")
+            await interaction.followup.send(
+                view=container_view(discord.ui.TextDisplay("Could not post the showcase here.")),
+                ephemeral=True,
+            )
+            return
         await interaction.followup.send(
-            view=container_view(
-                discord.ui.MediaGallery(discord.MediaGalleryItem(uploaded.uri)),
-            ),
-            files=[uploaded],
+            view=container_view(discord.ui.TextDisplay("Showcase posted.")),
+            ephemeral=True,
         )
 
 
