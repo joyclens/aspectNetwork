@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 from pathlib import Path
 from typing import Any, Final
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -18,6 +20,12 @@ from bot.shared.layout import container_view
 logger = logging.getLogger("aspect")
 
 BASE_PATH: Final[Path] = Path(__file__).resolve().parents[1] / "assets" / "clothing" / "base.png"
+_ASSET: Final[str] = "https://assetdelivery.roproxy.com/v1/asset/?id="
+_ASSET_ID: Final[re.Pattern[str]] = re.compile(r"<url>.*\?id=(\d+)</url>")
+_USER_AGENT: Final[str] = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+)
 
 MAPPING: Final[dict[str, list[dict[str, int]]]] = {
     "shirt": [
@@ -43,6 +51,13 @@ MAPPING: Final[dict[str, list[dict[str, int]]]] = {
 }
 
 
+class TemplateError(Exception):
+    def __init__(self, clothing_id: int, detail: str) -> None:
+        self.clothing_id = clothing_id
+        self.detail = detail
+        super().__init__(f"{clothing_id}: {detail}")
+
+
 def generate_preview(shirt_data: bytes, pants_data: bytes, base_path: Path) -> bytes:
     base = Image.open(base_path).convert("RGBA")
     shirt = Image.open(io.BytesIO(shirt_data)).convert("RGBA")
@@ -62,12 +77,51 @@ def generate_preview(shirt_data: bytes, pants_data: bytes, base_path: Path) -> b
     return output.getvalue()
 
 
-def _is_image(attachment: discord.Attachment) -> bool:
-    name = attachment.filename.lower()
-    if name.endswith((".png", ".jpg", ".jpeg", ".webp")):
-        return True
-    content = (attachment.content_type or "").lower()
-    return content.startswith("image/")
+async def download_template(
+    session: aiohttp.ClientSession,
+    clothing_id: int,
+    cookie: str,
+) -> bytes:
+    headers = {
+        "User-Agent": _USER_AGENT,
+        "Cookie": cookie,
+    }
+    timeout = aiohttp.ClientTimeout(total=15)
+    try:
+        async with session.get(
+            f"{_ASSET}{clothing_id}",
+            headers=headers,
+            timeout=timeout,
+        ) as response:
+            if response.status >= 300:
+                raise TemplateError(clothing_id, f"asset lookup failed ({response.status})")
+            xml = await response.text()
+    except (aiohttp.ClientError, TimeoutError, UnicodeError) as exc:
+        raise TemplateError(clothing_id, "asset lookup failed") from exc
+
+    match = _ASSET_ID.search(xml)
+    if match is None:
+        raise TemplateError(clothing_id, "could not resolve template asset")
+    image_id = match.group(1)
+
+    try:
+        async with session.get(
+            f"{_ASSET}{image_id}",
+            headers=headers,
+            timeout=timeout,
+        ) as response:
+            if response.status >= 300:
+                raise TemplateError(clothing_id, f"template download failed ({response.status})")
+            data = await response.read()
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        raise TemplateError(clothing_id, "template download failed") from exc
+
+    try:
+        image = Image.open(io.BytesIO(data))
+        image.load()
+    except Exception as exc:
+        raise TemplateError(clothing_id, "downloaded file is not a valid image") from exc
+    return data
 
 
 def _can_showcase(member: discord.Member) -> bool:
@@ -87,15 +141,15 @@ class Showcase(commands.Cog):
         description="Preview Roblox shirt and pants templates on the clothing base.",
     )
     @app_commands.describe(
-        shirt="Roblox shirt template image",
-        pants="Roblox pants template image",
+        shirt="Roblox shirt clothing ID",
+        pants="Roblox pants clothing ID",
     )
     @app_commands.guild_only()
     async def showcase(
         self,
         interaction: discord.Interaction[Any],
-        shirt: discord.Attachment,
-        pants: discord.Attachment,
+        shirt: app_commands.Range[int, 1, None],
+        pants: app_commands.Range[int, 1, None],
     ) -> None:
         if not isinstance(interaction.user, discord.Member) or not _can_showcase(interaction.user):
             await interaction.response.send_message(
@@ -113,23 +167,37 @@ class Showcase(commands.Cog):
                 ephemeral=True,
             )
             return
-        if not _is_image(shirt) or not _is_image(pants):
+        session = self.bot.session
+        if session is None or session.closed:
             await interaction.response.send_message(
-                view=container_view(
-                    discord.ui.TextDisplay("Both attachments must be image files.")
-                ),
+                view=container_view(discord.ui.TextDisplay("Roblox downloads are unavailable.")),
                 ephemeral=True,
             )
             return
         await interaction.response.defer(thinking=True)
+        cookie = self.bot.settings.roblox_cookie.get_secret_value()
         try:
-            shirt_data, pants_data = await asyncio.gather(shirt.read(), pants.read())
+            shirt_data, pants_data = await asyncio.gather(
+                download_template(session, int(shirt), cookie),
+                download_template(session, int(pants), cookie),
+            )
             preview = await asyncio.to_thread(
                 generate_preview,
                 shirt_data,
                 pants_data,
                 BASE_PATH,
             )
+        except TemplateError as exc:
+            logger.warning("Showcase template failed for %s: %s", exc.clothing_id, exc.detail)
+            await interaction.followup.send(
+                view=container_view(
+                    discord.ui.TextDisplay(
+                        f"Could not fetch clothing `{exc.clothing_id}` - {exc.detail}."
+                    )
+                ),
+                ephemeral=True,
+            )
+            return
         except Exception:
             logger.exception("Showcase preview failed")
             await interaction.followup.send(
