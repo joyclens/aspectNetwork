@@ -55,9 +55,9 @@ class Aspect(commands.Bot):
             case_insensitive=True,
             strip_after_prefix=True,
             intents=discord.Intents.all(),
-            allowed_mentions=discord.AllowedMentions.none(),
             help_command=None,
             max_messages=300,
+            status=discord.Status.dnd,
         )
         self.settings = settings
         self.session: aiohttp.ClientSession | None = None

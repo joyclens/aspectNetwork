@@ -383,7 +383,7 @@ class Verification(commands.Cog):
                     remember_error(self.bot.traceback, exc, where="Button verifyContinue")
                     return
         if member is not None:
-            await self._grant(member, username)
+            await self._grant(member, username, roblox_id)
 
     async def _watch(
         self,
@@ -412,9 +412,10 @@ class Verification(commands.Cog):
                 if result.discord_id not in {None, str(member.id)}:
                     logger.warning("Dock session finished for a different Discord user")
                     return
-                username = await self._show_success(message, int(result.roblox_id))
+                roblox_id = int(result.roblox_id)
+                username = await self._show_success(message, roblox_id)
                 if username is not None:
-                    await self._grant(member, username)
+                    await self._grant(member, username, roblox_id)
                 return
             if state.status in {"expired", "cancelled"}:
                 return
@@ -520,7 +521,7 @@ class Verification(commands.Cog):
         )
         return view
 
-    async def _grant(self, member: discord.Member, username: str) -> None:
+    async def _grant(self, member: discord.Member, username: str, roblox_id: int) -> None:
         guild = member.guild
         add: list[discord.Role] = []
         remove: list[discord.Role] = []
@@ -542,12 +543,37 @@ class Verification(commands.Cog):
         except discord.HTTPException as exc:
             remember_error(self.bot.traceback, exc, where="Verification role")
         nick = " ".join(username.split())[:32]
-        if not nick or member.nick == nick:
+        if nick and member.nick != nick:
+            try:
+                await member.edit(nick=nick, reason="Dock verification")
+            except discord.HTTPException:
+                logger.warning("Could not nickname %s to %s", member.id, nick)
+        await self._log(member, username, roblox_id)
+
+    async def _log(self, member: discord.Member, username: str, roblox_id: int) -> None:
+        channel = self.bot.get_channel(Channels.verify_logs)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(Channels.verify_logs)
+            except discord.HTTPException:
+                logger.warning("Verification log channel is unavailable")
+                return
+        if not isinstance(channel, discord.TextChannel):
+            logger.warning("Verification log channel is unavailable")
             return
+        profile = f"https://www.roblox.com/users/{roblox_id}/profile"
+        view = container_view(
+            discord.ui.TextDisplay(
+                f"{Emojis.approve} **Member Verified**\n"
+                f"**Discord:** {member.mention} [`{member.id}`]\n"
+                f"**Roblox:** [{username}]({profile}) [`{roblox_id}`]\n"
+                f"**When:** <t:{int(datetime.now(UTC).timestamp())}:f>"
+            ),
+        )
         try:
-            await member.edit(nick=nick, reason="Dock verification")
+            await channel.send(view=view)
         except discord.HTTPException:
-            logger.warning("Could not nickname %s to %s", member.id, nick)
+            logger.warning("Could not send verification log for %s", member.id)
 
 
 async def setup(bot: Aspect) -> None:
