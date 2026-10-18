@@ -11,9 +11,9 @@ async def identify(self: DiscordWebSocket) -> None:
         "d": {
             "token": self.token,
             "properties": {
-                "os": "VR",
-                "browser": "VR",
-                "device": "VR",
+                "os": "Discord VR",
+                "browser": "Discord VR",
+                "device": "Discord VR",
             },
             "compress": True,
             "large_threshold": 250,
