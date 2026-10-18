@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from discord.gateway import DiscordWebSocket
+
+logger = logging.getLogger("aspect")
+
+# discord.py 2.7 uses unprefixed keys. Discord classifies VR from this trio:
+# os=android + browser/device="Discord VR" (see Discord-VR / current gateway).
+_PROPERTIES: dict[str, str] = {
+    "os": "android",
+    "browser": "Discord VR",
+    "device": "Discord VR",
+    "$os": "android",
+    "$browser": "Discord VR",
+    "$device": "oculus",
+}
 
 
 async def identify(self: DiscordWebSocket) -> None:
@@ -10,13 +24,7 @@ async def identify(self: DiscordWebSocket) -> None:
         "op": self.IDENTIFY,
         "d": {
             "token": self.token,
-            "properties": {
-                "$os": "android",
-                "$browser": "Discord VR",
-                "$device": "oculus",
-                "$referrer": "",
-                "$referring_domain": "",
-            },
+            "properties": dict(_PROPERTIES),
             "compress": True,
             "large_threshold": 250,
         },
@@ -39,6 +47,11 @@ async def identify(self: DiscordWebSocket) -> None:
 
     await self.call_hooks("before_identify", self.shard_id, initial=self._initial_identify)
     await self.send_as_json(payload)
+    logger.info("Gateway identify sent as Discord VR")
 
 
-DiscordWebSocket.identify = identify  # type: ignore[method-assign]
+def apply() -> None:
+    DiscordWebSocket.identify = identify  # type: ignore[method-assign]
+
+
+apply()
