@@ -59,27 +59,38 @@ class Guild:
 
 
 class Channels:
-    dashboard: Final[int] = 1559883245175439390
-    tickets_category: Final[int] = 1559883202930147451
-    welcome: Final[int] = 1559284772507877508
-    verify: Final[int] = 1559306245901389907
-    marketplace: Final[int] = 1559893992106233866
-    ticket_logs: Final[int] = 1559883403996823552
-    purchase_logs: Final[int] = 1559896562426060860
+    dashboard: Final[int] = 1529141669340123257
+    tickets_category: Final[int] = 1531807371095969802
+    welcome: Final[int] = 1551307570822779020
+    verify: Final[int] = 1530638348421566678
+    marketplace: Final[int] = 1529142741110358027
+    ticket_logs: Final[int] = 1554248401325916240
+    purchase_logs: Final[int] = 1530650718183358495
 
-    package_submissions: Final[int] = 1560013999926411335
-    package_storage: Final[int] = 1560014006700478604
-    package_forum_branding: Final[int] = 1560013923002880000
-    package_forum_liveries: Final[int] = 1560013939763454113
-    package_forum_clothing: Final[int] = 1560013962165362851
-    package_forum_development: Final[int] = 1560013977969238037
+    package_submissions: Final[int] = 1530635619586412757
+    package_storage: Final[int] = 1530635619586412757
+    package_forum_branding: Final[int] = 1529150483653066783
+    package_forum_liveries: Final[int] = 1529150112935313561
+    package_forum_clothing: Final[int] = 1529150626527711308
+    package_forum_development: Final[int] = 1529150869877297242
 
 
 class Roles:
-    verified: Final[int] = 1559883463845478481
-    ticket_support: Final[int] = 1559883485466857563
-    packager: Final[int] = 1560021566400757850
-    management: Final[int] = 1559883485466857563
+    verified: Final[int] = 1531014387886854204
+    ticket_support: Final[int] = 1529177325847969895
+    packager: Final[int] = 1529136222876995644
+    management: Final[int] = 1529177325847969895
+    member: Final[int] = 1529136322273476678
+    unverified: Final[int] = 1531014355561349301
+
+    free_releases: Final[int] = 1560376227234058240
+    content: Final[int] = 1560376227234058240
+    events: Final[int] = 1531013095710003301
+    giveaways: Final[int] = 1531013093855858688
+    marketplace: Final[int] = 1531013093411389582
+    news: Final[int] = 1531013091163242586
+    spotlight: Final[int] = 1531013094392987762
+    updates: Final[int] = 1531013092744630392
 
 
 class Users:
