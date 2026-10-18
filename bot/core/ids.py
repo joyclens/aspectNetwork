@@ -55,7 +55,7 @@ class App:
 
 
 class Guild:
-    id: Final[int] = 1559284770440216639
+    id: Final[int] = 1529135675318866020
 
 
 class Channels:
