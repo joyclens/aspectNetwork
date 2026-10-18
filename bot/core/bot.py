@@ -121,6 +121,7 @@ class Aspect(commands.Bot):
         await self.roblox.start()
         await asyncio.gather(self._check_roblox(), self._start_dock(), self._start_cookie())
         await self._load_extensions()
+        await self._sync_commands()
 
     async def on_ready(self) -> None:
         if self._banner_printed or self.user is None:
