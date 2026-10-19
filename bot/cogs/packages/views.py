@@ -393,16 +393,32 @@ class SettleConfirm(ui.View):
         self.packager_id = packager_id
         self.actor_id = actor_id
 
-    @ui.button(label="Confirm settle", style=discord.ButtonStyle.danger)
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.user.id == self.actor_id:
+            return True
+        await interaction.response.send_message(
+            view=container_view(ui.TextDisplay("This confirmation is not yours.")),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_timeout(self) -> None:
+        from bot.shared.persistence import disable_view
+
+        await disable_view(self)
+
+    @ui.button(
+        label="Confirm Settle",
+        style=discord.ButtonStyle.danger,
+        custom_id="package:settle:confirm",
+    )
     async def confirm(self, interaction: Interaction, _button: ui.Button[Any]) -> None:
-        if interaction.user.id != self.actor_id:
-            await interaction.response.send_message(
-                view=container_view(ui.TextDisplay("This confirmation is not yours.")),
-                ephemeral=True,
-            )
-            return
         service = _service(interaction)
         if service is None or not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         if not service.is_management(interaction.user):
             await interaction.response.send_message(
@@ -414,6 +430,10 @@ class SettleConfirm(ui.View):
 
         client = interaction.client
         if not isinstance(client, Aspect):
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("Packages are unavailable.")),
+                ephemeral=True,
+            )
             return
         count = await database(client).settle_payouts(self.packager_id, interaction.user.id)
         await interaction.response.edit_message(

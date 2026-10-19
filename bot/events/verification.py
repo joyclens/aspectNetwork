@@ -15,6 +15,12 @@ from bot.services.dock import DockError, SessionCreated
 from bot.services.roblox import RobloxError
 from bot.shared.errors import remember_error, report_interaction
 from bot.shared.layout import AspectLayout, container_view
+from bot.shared.persistence import (
+    PersistentView,
+    disable_view,
+    register_persistent,
+    unregister_persistent,
+)
 
 logger = logging.getLogger("aspect")
 
@@ -45,6 +51,7 @@ class VerifyButton(discord.ui.Button[Any]):
         super().__init__(
             label="Begin Verification",
             style=discord.ButtonStyle.secondary,
+            # LEGACY custom_id — do not rename; live verification panel uses this.
             custom_id="verifyButton",
         )
 
@@ -105,11 +112,17 @@ class VerificationPanel(AspectLayout):
         )
 
 
+class _KnownVerifyView(AspectLayout):
+    async def on_timeout(self) -> None:
+        await disable_view(self)
+
+
 class _Continue(discord.ui.Button[Any]):
     def __init__(self, roblox_id: int, username: str, emoji: str) -> None:
         super().__init__(
             label="Continue",
             style=discord.ButtonStyle.secondary,
+            # LEGACY custom_id shape — temporary verify continue (view timeout=300).
             custom_id=f"verifyContinue:{roblox_id}",
         )
         self.roblox_id = roblox_id
@@ -142,6 +155,7 @@ class Verification(commands.Cog):
         self._tasks: set[asyncio.Task[None]] = set()
         self._emoji_tasks: dict[int, asyncio.Task[None]] = {}
         self._handled: OrderedDict[int, None] = OrderedDict()
+        self._persistent: list[PersistentView] = []
 
     def claim(self, interaction_id: int) -> bool:
         if interaction_id in self._handled:
@@ -152,9 +166,12 @@ class Verification(commands.Cog):
         return True
 
     async def cog_load(self) -> None:
-        self.bot.add_view(VerificationPanel())
+        self._persistent = [register_persistent(self.bot, VerificationPanel())]
 
     async def cog_unload(self) -> None:
+        for view in self._persistent:
+            unregister_persistent(self.bot, view)
+        self._persistent.clear()
         for task in self._tasks:
             task.cancel()
         pending = list(self._emoji_tasks)
@@ -476,7 +493,7 @@ class Verification(commands.Cog):
     def _known_view(self, username: str, roblox_id: int, emoji: str) -> discord.ui.LayoutView:
         profile = f"https://www.roblox.com/users/{roblox_id}/profile"
         shot = f" {emoji}" if emoji else ""
-        view = AspectLayout(timeout=300)
+        view = _KnownVerifyView(timeout=300)
         view.add_item(
             discord.ui.Container(
                 discord.ui.TextDisplay(

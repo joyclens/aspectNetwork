@@ -20,6 +20,12 @@ from bot.shared.context import require_context
 from bot.shared.converters import Duration
 from bot.shared.errors import DatabaseUnavailable, report_interaction
 from bot.shared.layout import AspectLayout, container_view
+from bot.shared.persistence import (
+    PersistentView,
+    disable_view,
+    register_persistent,
+    unregister_persistent,
+)
 
 logger = logging.getLogger("aspect")
 
@@ -189,12 +195,28 @@ class ParticipantsButton(ui.Button[Any]):
 
 class LeaveView(ui.View):
     def __init__(self, bot: Aspect, message: discord.Message, member_id: int) -> None:
-        super().__init__()
+        super().__init__(timeout=60)
         self.bot = bot
-        self.message = message
+        self.target_message = message
         self.member_id = member_id
 
-    @ui.button(label="Leave the Giveaway", style=discord.ButtonStyle.danger)
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        if interaction.user.id == self.member_id:
+            return True
+        await interaction.response.send_message(
+            view=container_view(ui.TextDisplay("This leave button is not yours.")),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_timeout(self) -> None:
+        await disable_view(self)
+
+    @ui.button(
+        label="Leave the Giveaway",
+        style=discord.ButtonStyle.danger,
+        custom_id="giveaway:leave",
+    )
     async def leave(self, interaction: Interaction, _button: ui.Button[Any]) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
@@ -204,15 +226,15 @@ class LeaveView(ui.View):
             return
         await interaction.response.defer(ephemeral=True)
         db = database(self.bot)
-        row = await db.giveaway(interaction.guild_id, self.message.id)
+        row = await db.giveaway(interaction.guild_id, self.target_message.id)
         if row is None:
             await reply(interaction, "This giveaway does not exist or has been removed.")
             return
-        members = await db.remove_giveaway_member(self.message.id, self.member_id)
+        members = await db.remove_giveaway_member(self.target_message.id, self.member_id)
         if members is None:
             await reply(interaction, "This giveaway does not exist or has been removed.")
             return
-        await edit_giveaway(self.bot, self.message, replace(row, members=members))
+        await edit_giveaway(self.bot, self.target_message, replace(row, members=members))
         await reply(interaction, "You left the giveaway.")
 
 
@@ -265,13 +287,12 @@ def giveaway_layout(
     return view
 
 
-def register_persistent_views(bot: Aspect) -> None:
+def giveaway_persistent_views() -> list[AspectLayout]:
     active = AspectLayout(timeout=None)
     active.add_item(ui.Container(ui.ActionRow(JoinButton(), ParticipantsButton())))
     ended = AspectLayout(timeout=None)
     ended.add_item(ui.Container(ui.ActionRow(ParticipantsButton(ended=True))))
-    bot.add_view(active)
-    bot.add_view(ended)
+    return [active, ended]
 
 
 async def reply(interaction: Interaction, text: str) -> None:
@@ -430,13 +451,19 @@ async def end_giveaway(bot: Aspect, row: Giveaway) -> None:
 class Giveaways(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
+        self._persistent: list[PersistentView] = []
 
     async def cog_load(self) -> None:
-        register_persistent_views(self.bot)
+        self._persistent = [
+            register_persistent(self.bot, view) for view in giveaway_persistent_views()
+        ]
         self.watch.start()
 
     async def cog_unload(self) -> None:
         self.watch.cancel()
+        for view in self._persistent:
+            unregister_persistent(self.bot, view)
+        self._persistent.clear()
 
     @tasks.loop(minutes=1)
     async def watch(self) -> None:

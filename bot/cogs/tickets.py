@@ -18,27 +18,21 @@ from bot.shared.checks import database
 from bot.shared.context import Confirmation, PromptDeclined, require_context
 from bot.shared.errors import DatabaseUnavailable, report_interaction
 from bot.shared.layout import AspectLayout, container_view
+from bot.shared.persistence import (
+    PersistentView,
+    disable_view,
+    register_persistent,
+    unregister_persistent,
+)
 
 logger = logging.getLogger("aspect")
 
-FOOTER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png?ex=6ad54760&is=6ad3f5e0&hm=a620cfc6a45f8943e51320363b156c32491524ee8f70116a5cc52fa43faa96c3&"
-)
-DASHBOARD_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891838950375454/dashboard.png?ex=6ad5440c&is=6ad3f28c&hm=72c2679975b0d1a9a4edd0991deefecdea82a8a178140c56d92e910056e2f90a&"
-)
-SUPPORT_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891882709291130/support.png?ex=6ad54416&is=6ad3f296&hm=9960a0f7ad85b6bf03112fecbcf4e5c84fc828d2db653dce1ef1728185f76974&"
-)
-TICKET_FOOTER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891965811167284/image.png?ex=6ad5442a&is=6ad3f2aa&hm=9728bf0ce6a60564553ac7b4129c5a0d77d5ddb1cc86b1cce2b6188ab1f6d68a&"
-)
-REGULATIONS_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891837926838322/regulations.png?ex=6ad5440c&is=6ad3f28c&hm=cf40f0c47129a3c4016d86fca046294aa01128162fd8380cf47141d223496fe3&"
-)
-PACKAGES_BANNER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/1553891841181622362/packages.png?ex=6ad5440c&is=6ad3f28c&hm=c14adb4890683dbf81532b1a986ba58fce6cabf4ef2719957d988bfb0d362a7b&"
-)
+FOOTER = "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png?ex=6ad54760&is=6ad3f5e0&hm=a620cfc6a45f8943e51320363b156c32491524ee8f70116a5cc52fa43faa96c3&"
+DASHBOARD_BANNER = "https://cdn.discordapp.com/attachments/1553889994538750133/1553891838950375454/dashboard.png?ex=6ad5440c&is=6ad3f28c&hm=72c2679975b0d1a9a4edd0991deefecdea82a8a178140c56d92e910056e2f90a&"
+SUPPORT_BANNER = "https://cdn.discordapp.com/attachments/1553889994538750133/1553891882709291130/support.png?ex=6ad54416&is=6ad3f296&hm=9960a0f7ad85b6bf03112fecbcf4e5c84fc828d2db653dce1ef1728185f76974&"
+TICKET_FOOTER = "https://cdn.discordapp.com/attachments/1553889994538750133/1553891965811167284/image.png?ex=6ad5442a&is=6ad3f2aa&hm=9728bf0ce6a60564553ac7b4129c5a0d77d5ddb1cc86b1cce2b6188ab1f6d68a&"
+REGULATIONS_BANNER = "https://cdn.discordapp.com/attachments/1553889994538750133/1553891837926838322/regulations.png?ex=6ad5440c&is=6ad3f28c&hm=cf40f0c47129a3c4016d86fca046294aa01128162fd8380cf47141d223496fe3&"
+PACKAGES_BANNER = "https://cdn.discordapp.com/attachments/1553889994538750133/1553891841181622362/packages.png?ex=6ad5440c&is=6ad3f28c&hm=c14adb4890683dbf81532b1a986ba58fce6cabf4ef2719957d988bfb0d362a7b&"
 
 _SLUG = re.compile(r"[^a-z0-9-]+")
 
@@ -211,6 +205,7 @@ class CloseButton(ui.Button[Any]):
         super().__init__(
             label="Close",
             style=discord.ButtonStyle.danger,
+            # LEGACY custom_id — do not rename; live ticket panels use this.
             custom_id="closeSupport:button",
         )
 
@@ -281,16 +276,18 @@ def claim_notice(member: discord.Member) -> AspectLayout:
 
 def unclaim_notice(member: discord.Member) -> AspectLayout:
     return container_view(
-        ui.TextDisplay(f"{member.mention} has unclaimed this ticket, please wait for someone to claim it.")
+        ui.TextDisplay(
+            f"{member.mention} has unclaimed this ticket, please wait for someone to claim it."
+        )
     )
 
 
-def register_ticket_views(bot: Aspect) -> None:
+def ticket_panel_view() -> AspectLayout:
     panel = AspectLayout(timeout=None)
     panel.add_item(
         ui.Container(ui.ActionRow(ClaimButton(), UnclaimButton(), CloseButton(), EscalateButton()))
     )
-    bot.add_view(panel)
+    return panel
 
 
 class GetHelp(ui.Button[Any]):
@@ -419,8 +416,16 @@ class CloseRequest(AspectLayout):
         super().__init__(timeout=300)
         self.owner_id = owner_id
         self.staff_id = staff_id
-        accept: ui.Button[Any] = ui.Button(label="Accept", style=discord.ButtonStyle.success)
-        deny: ui.Button[Any] = ui.Button(label="Deny", style=discord.ButtonStyle.danger)
+        accept: ui.Button[Any] = ui.Button(
+            label="Accept",
+            style=discord.ButtonStyle.success,
+            custom_id="ticket:closerequest:accept",
+        )
+        deny: ui.Button[Any] = ui.Button(
+            label="Deny",
+            style=discord.ButtonStyle.danger,
+            custom_id="ticket:closerequest:deny",
+        )
 
         async def on_accept(interaction: discord.Interaction[Any]) -> None:
             if interaction.user.id != self.owner_id:
@@ -458,7 +463,7 @@ class CloseRequest(AspectLayout):
             ui.Container(
                 ui.TextDisplay(
                     f"## Close Request\n"
-                    f"<@{staff_id}> has requested to close this ticket, please use the "
+                    f"Hello **{owner.mention}!** <@{staff_id}> has requested to close this ticket, please use the "
                     "buttons below to either accept or deny.",
                 ),
                 ui.Separator(
@@ -475,17 +480,34 @@ class CloseRequest(AspectLayout):
         )
 
     async def interaction_check(self, interaction: discord.Interaction[Any]) -> bool:
-        return interaction.user.id == self.owner_id
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(
+            view=container_view(ui.TextDisplay("Only the ticket owner can use this.")),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_timeout(self) -> None:
+        await disable_view(self)
 
 
 class Tickets(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
         self._dashboard_id: int | None = None
+        self._persistent: list[PersistentView] = []
 
     async def cog_load(self) -> None:
-        self.bot.add_view(Dashboard())
-        register_ticket_views(self.bot)
+        self._persistent = [
+            register_persistent(self.bot, Dashboard()),
+            register_persistent(self.bot, ticket_panel_view()),
+        ]
+
+    async def cog_unload(self) -> None:
+        for view in self._persistent:
+            unregister_persistent(self.bot, view)
+        self._persistent.clear()
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -694,9 +716,7 @@ class Tickets(commands.Cog):
         if not 3 <= len(cleaned) <= 200:
             await ctx.warn("That reason is not valid.")
             return
-        opener = ctx.guild.get_member(ticket.owner_id) if ctx.guild is not None else None
         await ctx.send(
-            content=opener.mention if opener is not None else f"<@{ticket.owner_id}>",
             view=CloseRequest(ticket.owner_id, ctx.author.id, cleaned),
             allowed_mentions=discord.AllowedMentions(users=True),
         )

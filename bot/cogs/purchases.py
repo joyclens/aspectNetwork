@@ -15,7 +15,7 @@ from bot.services.dock import DockError
 from bot.services.roblox import RobloxError, Sale
 from bot.shared.checks import database
 from bot.shared.context import require_context
-from bot.shared.layout import AspectLayout
+from bot.shared.layout import AspectLayout, container_view
 
 logger = logging.getLogger("aspect")
 
@@ -118,7 +118,18 @@ class History(AspectLayout):
         self.render()
 
     async def interaction_check(self, interaction: discord.Interaction[Any]) -> bool:
-        return interaction.user.id == self.author
+        if interaction.user.id == self.author:
+            return True
+        await interaction.response.send_message(
+            view=container_view(ui.TextDisplay("This history view is not yours.")),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_timeout(self) -> None:
+        from bot.shared.persistence import disable_view
+
+        await disable_view(self)
 
     def render(self) -> None:
         self.clear_items()

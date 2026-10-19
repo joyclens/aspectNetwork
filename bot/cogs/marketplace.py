@@ -10,6 +10,7 @@ from discord.ext import commands
 from bot.core.bot import Aspect
 from bot.core.ids import Channels, Emojis, partial_emoji
 from bot.shared.layout import AspectLayout, container_view
+from bot.shared.persistence import PersistentView, register_persistent, unregister_persistent
 
 logger = logging.getLogger("aspect")
 
@@ -207,9 +208,15 @@ class MarketplaceCog(commands.Cog):
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
         self._panel_id: int | None = None
+        self._persistent: list[PersistentView] = []
 
     async def cog_load(self) -> None:
-        self.bot.add_view(Marketplace())
+        self._persistent = [register_persistent(self.bot, Marketplace())]
+
+    async def cog_unload(self) -> None:
+        for view in self._persistent:
+            unregister_persistent(self.bot, view)
+        self._persistent.clear()
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:

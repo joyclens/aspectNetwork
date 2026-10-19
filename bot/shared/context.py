@@ -7,6 +7,7 @@ from discord.ext import commands
 
 from bot.core.ids import Emojis
 from bot.shared.layout import AspectLayout, container_view
+from bot.shared.persistence import disable_view
 
 if TYPE_CHECKING:
     from bot.core.bot import Aspect
@@ -52,6 +53,9 @@ class Confirmation(AspectLayout):
             ephemeral=True,
         )
         return False
+
+    async def on_timeout(self) -> None:
+        await disable_view(self)
 
 
 class Context(commands.Context["Aspect"]):
