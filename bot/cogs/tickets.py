@@ -457,7 +457,9 @@ class CloseRequest(AspectLayout):
         self.add_item(
             ui.Container(
                 ui.TextDisplay(
-                    f"## Close Request\{nStaff} asked to close this ticket.\n**Reason:** {reason}"
+                    f"## Close Request\n"
+                    f"<@{staff_id}> asked to close this ticket.\n"
+                    f"**Reason:** {reason}"
                 ),
                 ui.ActionRow(accept, deny),
             )
