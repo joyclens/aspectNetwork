@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
@@ -195,8 +196,8 @@ class Aspect(commands.Bot):
             original = exception.original
         try:
             if isinstance(exception, commands.CommandOnCooldown):
-                wait = f"{exception.retry_after:.0f}"
-                await context.warn(f"Slow down. Try again in {wait}s.")
+                ready = int(time.time() + exception.retry_after)
+                await context.warn(f"You're on **cooldown**, try again <t:{ready}:R>")
                 return
             if isinstance(exception, commands.MissingPermissions | commands.BotMissingPermissions):
                 await context.warn("You do not have permission to use that.")

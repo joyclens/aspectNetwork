@@ -461,10 +461,11 @@ class CloseRequest(AspectLayout):
         deny.callback = on_deny  # type: ignore[method-assign]
         self.add_item(
             ui.Container(
+                ui.TextDisplay(f"<@{owner_id}>"),
                 ui.TextDisplay(
                     f"## Close Request\n"
-                    f"Hello **{owner.mention}!** <@{staff_id}> has requested to close this ticket, please use the "
-                    "buttons below to either accept or deny.",
+                    f"Hello **<@{owner_id}>!** <@{staff_id}> has requested to close this ticket, "
+                    "please use the buttons below to either accept or deny.",
                 ),
                 ui.Separator(
                     visible=True,
