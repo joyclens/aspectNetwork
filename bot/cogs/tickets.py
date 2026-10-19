@@ -458,8 +458,17 @@ class CloseRequest(AspectLayout):
             ui.Container(
                 ui.TextDisplay(
                     f"## Close Request\n"
-                    f"<@{staff_id}> asked to close this ticket.\n"
-                    f"**Reason:** {reason}"
+                    f"<@{staff_id}> has requested to close this ticket, please use the "
+                    "buttons below to either accept or deny.",
+                ),
+                ui.Separator(
+                    visible=True,
+                    spacing=discord.SeparatorSpacing.large,
+                ),
+                ui.TextDisplay(f"```\n{reason}\n```"),
+                ui.Separator(
+                    visible=True,
+                    spacing=discord.SeparatorSpacing.large,
                 ),
                 ui.ActionRow(accept, deny),
             )
@@ -685,7 +694,12 @@ class Tickets(commands.Cog):
         if not 3 <= len(cleaned) <= 200:
             await ctx.warn("That reason is not valid.")
             return
-        await ctx.send(view=CloseRequest(ticket.owner_id, ctx.author.id, cleaned))
+        opener = ctx.guild.get_member(ticket.owner_id) if ctx.guild is not None else None
+        await ctx.send(
+            content=opener.mention if opener is not None else f"<@{ticket.owner_id}>",
+            view=CloseRequest(ticket.owner_id, ctx.author.id, cleaned),
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
 
     async def open_ticket(
         self,
@@ -1178,7 +1192,7 @@ class Tickets(commands.Cog):
         )
         items: list[ui.Item[Any]] = [
             ui.TextDisplay(text),
-            ui.Separator(visible=False),
+            ui.Separator(visible=True),
         ]
         files: list[discord.File] = []
         if url is not None:
@@ -1188,7 +1202,7 @@ class Tickets(commands.Cog):
                 files.append(uploaded)
             else:
                 items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
-        items.append(ui.Separator(visible=False))
+        items.append(ui.Separator(visible=True))
         items.append(ui.MediaGallery(discord.MediaGalleryItem(FOOTER)))
         try:
             await user.send(view=container_view(*items), files=files)

@@ -162,7 +162,7 @@ def delivery_layout(files: list[discord.File]) -> AspectLayout:
             "On behalf of **Aspect Network**, we appreciate your custom. "
             "The packager has been notified of your purchase, your files are attached below."
         ),
-        ui.Separator(visible=False),
+        ui.Separator(visible=True),
     ]
     for uploaded in files[:10]:
         items.append(ui.File(uploaded.uri))
@@ -208,7 +208,7 @@ def payouts_layout(
         )
     items: list[ui.Item[Any]] = [
         ui.TextDisplay(header),
-        ui.Separator(visible=False, spacing=discord.SeparatorSpacing.small),
+        ui.Separator(visible=True, spacing=discord.SeparatorSpacing.small),
     ]
     lines: list[str] = []
     visible = [row for row in rows if not pending_only or row.pending_total > 0]
@@ -228,7 +228,7 @@ def payouts_layout(
                     f"`{row.sales}` sale(s) · {robux} **{row.pending_total:,}** pending."
                 )
     items.append(ui.TextDisplay("\n".join(lines)))
-    items.append(ui.Separator(visible=False))
+    items.append(ui.Separator(visible=True))
     items.append(_banner())
     view = AspectLayout(timeout=None)
     view.add_item(ui.Container(*items))

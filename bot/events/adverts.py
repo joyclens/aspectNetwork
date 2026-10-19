@@ -55,7 +55,7 @@ def channel_for_members(count: int) -> int | None:
 def notice(text: str) -> discord.ui.LayoutView:
     return container_view(
         ui.TextDisplay(text),
-        ui.Separator(visible=False),
+        ui.Separator(visible=True),
         ui.MediaGallery(discord.MediaGalleryItem(FOOTER)),
     )
 

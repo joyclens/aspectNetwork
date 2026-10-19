@@ -33,7 +33,7 @@ def advertisements_view() -> AspectLayout:
     view.add_item(
         ui.Container(
             ui.MediaGallery(discord.MediaGalleryItem(MARKETPLACE_BANNER)),
-            ui.Separator(visible=False, spacing=_SMALL),
+            ui.Separator(visible=True, spacing=_SMALL),
             ui.TextDisplay(
                 f"The {Emojis.newsletter} **Aspect Advertisement** catalog will help you "
                 "boost your server's recognition. All products come with a ping."
@@ -67,7 +67,7 @@ def advertisements_view() -> AspectLayout:
                 "Queue items. Must be purchased with a SPGW or QA.",
                 "https://www.roblox.com/catalog/117463223374082",
             ),
-            ui.Separator(visible=False, spacing=_SMALL),
+            ui.Separator(visible=True, spacing=_SMALL),
             ui.MediaGallery(discord.MediaGalleryItem(FOOTER)),
         )
     )
@@ -79,7 +79,7 @@ def tos_view() -> AspectLayout:
     view.add_item(
         ui.Container(
             ui.MediaGallery(discord.MediaGalleryItem(MARKETPLACE_BANNER)),
-            ui.Separator(visible=False, spacing=_SMALL),
+            ui.Separator(visible=True, spacing=_SMALL),
             ui.TextDisplay(f"## {Emojis.regulations} **Aspect Marketplace Terms of Service**"),
             ui.Separator(visible=True, spacing=_SMALL),
             ui.TextDisplay(
@@ -184,7 +184,7 @@ class Marketplace(AspectLayout):
         self.add_item(
             ui.Container(
                 ui.MediaGallery(discord.MediaGalleryItem(MARKETPLACE_BANNER)),
-                ui.Separator(visible=False, spacing=_SMALL),
+                ui.Separator(visible=True, spacing=_SMALL),
                 ui.TextDisplay(
                     "Find your ideal product in the **Aspect Marketplace**. Browse a wide "
                     "range of products selected for you, including everything from sponsored "
