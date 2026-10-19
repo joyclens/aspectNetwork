@@ -15,12 +15,7 @@ from bot.services.dock import DockError, SessionCreated
 from bot.services.roblox import RobloxError
 from bot.shared.errors import remember_error, report_interaction
 from bot.shared.layout import AspectLayout, container_view
-from bot.shared.persistence import (
-    PersistentView,
-    disable_view,
-    register_persistent,
-    unregister_persistent,
-)
+from bot.shared.persistence import PersistentView, disable_view, register_persistent, unregister_persistent
 
 logger = logging.getLogger("aspect")
 
@@ -122,7 +117,6 @@ class _Continue(discord.ui.Button[Any]):
         super().__init__(
             label="Continue",
             style=discord.ButtonStyle.secondary,
-            # LEGACY custom_id shape — temporary verify continue (view timeout=300).
             custom_id=f"verifyContinue:{roblox_id}",
         )
         self.roblox_id = roblox_id
