@@ -11,7 +11,7 @@ from discord.ext import commands, tasks
 
 from bot.core.bot import Aspect
 from bot.core.ids import App, Channels, Emojis, Guild
-from bot.services.dock import DockError
+from bot.docksys import DockError
 from bot.services.roblox import RobloxError, Sale
 from bot.shared.checks import database
 from bot.shared.context import require_context

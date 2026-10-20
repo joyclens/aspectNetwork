@@ -156,3 +156,22 @@ CREATE TABLE IF NOT EXISTS package_reports (
 
 CREATE INDEX IF NOT EXISTS package_reports_cooldown_idx
     ON package_reports (package_id, reporter_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS sticky_messages (
+    channel_id BIGINT PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    message TEXT NOT NULL,
+    last_message_id BIGINT,
+    keep_old BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS sticky_messages_guild_idx
+    ON sticky_messages (guild_id);
+
+CREATE TABLE IF NOT EXISTS guild_tags (
+    guild_id BIGINT PRIMARY KEY,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    channel_id BIGINT,
+    message TEXT NOT NULL DEFAULT '',
+    role_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+);
