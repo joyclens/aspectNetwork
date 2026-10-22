@@ -10,8 +10,8 @@ import discord
 from discord.ext import commands
 
 from bot.core.bot import Aspect
-from bot.core.ids import Channels, Emojis, Guild, Roles, Secrets
-from bot.services.dock import DockError, SessionCreated
+from bot.core.ids import Channels, Emojis, Guild, Roles
+from bot.docksys import DockError, SessionCreated
 from bot.services.roblox import RobloxError
 from bot.shared.errors import remember_error, report_interaction
 from bot.shared.layout import AspectLayout, container_view
@@ -241,8 +241,10 @@ class Verification(commands.Cog):
             linked = await dock.linked_roblox(interaction.user.id, guild_id)
         except DockError as exc:
             logger.error(
-                "Dock linked lookup failed status=%s guild=%s detail=%s",
+                "Dock linked lookup failed status=%s code=%s request_id=%s guild=%s detail=%s",
                 exc.status,
+                exc.code,
+                exc.request_id,
                 guild_id,
                 exc.detail,
             )
@@ -258,10 +260,11 @@ class Verification(commands.Cog):
             session = await dock.create_session(str(interaction.user.id), guild_id)
         except DockError as exc:
             logger.error(
-                "Dock create_session failed status=%s guild=%s pid=%s detail=%s",
+                "Dock create_session failed status=%s code=%s request_id=%s guild=%s detail=%s",
                 exc.status,
+                exc.code,
+                exc.request_id,
                 guild_id,
-                Secrets.dock_pid,
                 exc.detail,
             )
             await interaction.followup.send(
@@ -416,15 +419,19 @@ class Verification(commands.Cog):
         deadline = min(deadline, datetime.now(UTC) + timedelta(minutes=30))
         while datetime.now(UTC) < deadline:
             try:
-                state = await dock.session_state(session.sid)
+                state = await dock.session_state(session.id)
             except DockError as exc:
                 if exc.status == 429:
-                    await asyncio.sleep(exc.retry_after if exc.retry_after is not None else 5)
+                    await asyncio.sleep(exc.retry_after if exc.retry_after is not None else 2)
                     continue
                 remember_error(self.bot.traceback, exc, where="Verification")
                 return
             result = state.result
-            if result is not None and result.roblox_id and result.roblox_id.isdigit():
+            if state.status == "completed" or (
+                result is not None and result.roblox_id and result.roblox_id.isdigit()
+            ):
+                if result is None or not result.roblox_id or not result.roblox_id.isdigit():
+                    return
                 if result.discord_id not in {None, str(member.id)}:
                     logger.warning("Dock session finished for a different Discord user")
                     return
@@ -507,7 +514,7 @@ class Verification(commands.Cog):
                     discord.ui.Button(
                         label="Change Account",
                         style=discord.ButtonStyle.link,
-                        url="https://api.docksys.xyz/v1/api/verify/discord",
+                        url="https://api.docksys.xyz/v2/verifications/discord",
                     ),
                 ),
             )

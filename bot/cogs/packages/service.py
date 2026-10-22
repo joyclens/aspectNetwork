@@ -38,7 +38,7 @@ from bot.core.bot import Aspect
 from bot.core.database import Package, PackagePurchase
 from bot.core.ids import App, Channels, Guild, Roles
 from bot.services.dock import DockError
-from bot.shared.checks import database, has_role, is_management
+from bot.shared.checks import database
 from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")

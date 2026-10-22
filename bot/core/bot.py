@@ -16,8 +16,8 @@ from bot.core.config import Settings
 from bot.core.database import Database, connect
 from bot.core.ids import App, Guild, Secrets
 from bot.core.ux import print_banner
+from bot.docksys import Dock
 from bot.services.cookie import Cookie
-from bot.services.dock import Dock
 from bot.services.roblox import Roblox, RobloxError
 from bot.shared.context import Context, PromptDeclined
 from bot.shared.errors import (

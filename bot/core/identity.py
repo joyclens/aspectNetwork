@@ -8,13 +8,13 @@ from discord.gateway import DiscordWebSocket
 logger = logging.getLogger("aspect")
 
 # discord.py 2.7 uses unprefixed keys. Discord classifies VR from this trio:
-# os=android + browser/device="Discord VR" (see Discord-VR / current gateway).
+# os=android + browser/device="Discord Android" (see Discord-VR / current gateway).
 _PROPERTIES: dict[str, str] = {
     "os": "android",
-    "browser": "Discord VR",
-    "device": "Discord VR",
+    "browser": "Discord Android",
+    "device": "Discord Android",
     "$os": "android",
-    "$browser": "Discord VR",
+    "$browser": "Discord Android",
     "$device": "oculus",
 }
 
@@ -47,7 +47,7 @@ async def identify(self: DiscordWebSocket) -> None:
 
     await self.call_hooks("before_identify", self.shard_id, initial=self._initial_identify)
     await self.send_as_json(payload)
-    logger.info("Gateway identify sent as Discord VR")
+    logger.info("Gateway identify sent as Discord Android")
 
 
 def apply() -> None:

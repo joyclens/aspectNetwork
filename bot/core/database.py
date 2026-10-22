@@ -109,6 +109,24 @@ class PackagerPayoutSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class StickyMessage:
+    channel_id: int
+    guild_id: int
+    message: str
+    last_message_id: int | None
+    keep_old: bool
+
+
+@dataclass(frozen=True, slots=True)
+class GuildTag:
+    guild_id: int
+    enabled: bool
+    channel_id: int | None
+    message: str
+    role_ids: list[int]
+
+
+@dataclass(frozen=True, slots=True)
 class PackagerPackageEarnings:
     package_id: int
     title: str
@@ -1146,6 +1164,148 @@ class Database:
             reporter_id,
             issue,
         )
+
+    async def sticky(self, channel_id: int) -> StickyMessage | None:
+        row = await self._pool.fetchrow(
+            """
+            SELECT channel_id, guild_id, message, last_message_id, keep_old
+            FROM sticky_messages
+            WHERE channel_id = $1
+            """,
+            channel_id,
+        )
+        return _sticky(row) if row else None
+
+    async def stickies(self, guild_id: int) -> list[StickyMessage]:
+        rows = await self._pool.fetch(
+            """
+            SELECT channel_id, guild_id, message, last_message_id, keep_old
+            FROM sticky_messages
+            WHERE guild_id = $1
+            ORDER BY channel_id ASC
+            """,
+            guild_id,
+        )
+        return [_sticky(row) for row in rows]
+
+    async def upsert_sticky(
+        self,
+        guild_id: int,
+        channel_id: int,
+        message: str,
+        keep_old: bool,
+    ) -> None:
+        await self._pool.execute(
+            """
+            INSERT INTO sticky_messages (channel_id, guild_id, message, last_message_id, keep_old)
+            VALUES ($1, $2, $3, NULL, $4)
+            ON CONFLICT (channel_id) DO UPDATE
+            SET guild_id = EXCLUDED.guild_id,
+                message = EXCLUDED.message,
+                keep_old = EXCLUDED.keep_old
+            """,
+            channel_id,
+            guild_id,
+            message,
+            keep_old,
+        )
+
+    async def set_sticky_last_message(self, channel_id: int, message_id: int) -> None:
+        await self._pool.execute(
+            """
+            UPDATE sticky_messages
+            SET last_message_id = $2
+            WHERE channel_id = $1
+            """,
+            channel_id,
+            message_id,
+        )
+
+    async def delete_sticky(self, channel_id: int) -> bool:
+        result = await self._pool.execute(
+            "DELETE FROM sticky_messages WHERE channel_id = $1",
+            channel_id,
+        )
+        return str(result).endswith("1")
+
+    async def guild_tag(self, guild_id: int) -> GuildTag | None:
+        row = await self._pool.fetchrow(
+            """
+            SELECT guild_id, enabled, channel_id, message, role_ids
+            FROM guild_tags
+            WHERE guild_id = $1
+            """,
+            guild_id,
+        )
+        return _guild_tag(row) if row else None
+
+    async def ensure_guild_tag(self, guild_id: int) -> GuildTag:
+        await self._pool.execute(
+            """
+            INSERT INTO guild_tags (guild_id, enabled)
+            VALUES ($1, FALSE)
+            ON CONFLICT (guild_id) DO NOTHING
+            """,
+            guild_id,
+        )
+        row = await self.guild_tag(guild_id)
+        if row is None:
+            raise RuntimeError("guild tag row missing after ensure")
+        return row
+
+    async def set_guild_tag_enabled(self, guild_id: int, enabled: bool) -> None:
+        await self._pool.execute(
+            """
+            INSERT INTO guild_tags (guild_id, enabled)
+            VALUES ($1, $2)
+            ON CONFLICT (guild_id) DO UPDATE SET enabled = EXCLUDED.enabled
+            """,
+            guild_id,
+            enabled,
+        )
+
+    async def set_guild_tag_message(self, guild_id: int, message: str) -> None:
+        await self._pool.execute(
+            "UPDATE guild_tags SET message = $2 WHERE guild_id = $1",
+            guild_id,
+            message,
+        )
+
+    async def set_guild_tag_channel(self, guild_id: int, channel_id: int | None) -> None:
+        await self._pool.execute(
+            "UPDATE guild_tags SET channel_id = $2 WHERE guild_id = $1",
+            guild_id,
+            channel_id,
+        )
+
+    async def set_guild_tag_roles(self, guild_id: int, role_ids: list[int]) -> None:
+        await self._pool.execute(
+            "UPDATE guild_tags SET role_ids = $2::jsonb WHERE guild_id = $1",
+            guild_id,
+            json.dumps(role_ids),
+        )
+
+
+def _sticky(row: Any) -> StickyMessage:
+    return StickyMessage(
+        channel_id=int(row["channel_id"]),
+        guild_id=int(row["guild_id"]),
+        message=str(row["message"]),
+        last_message_id=(
+            int(row["last_message_id"]) if row["last_message_id"] is not None else None
+        ),
+        keep_old=bool(row["keep_old"]),
+    )
+
+
+def _guild_tag(row: Any) -> GuildTag:
+    return GuildTag(
+        guild_id=int(row["guild_id"]),
+        enabled=bool(row["enabled"]),
+        channel_id=int(row["channel_id"]) if row["channel_id"] is not None else None,
+        message=str(row["message"] or ""),
+        role_ids=_ids(row["role_ids"]) or [],
+    )
 
     async def unclaimed_sales(
         self,
