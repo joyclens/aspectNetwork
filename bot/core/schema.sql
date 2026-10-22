@@ -227,3 +227,9 @@ CREATE TABLE IF NOT EXISTS invite_rewards (
     threshold INTEGER PRIMARY KEY,
     role_id BIGINT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS guild_tag_alerts (
+    user_id BIGINT PRIMARY KEY,
+    channel_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL
+);

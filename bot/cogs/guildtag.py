@@ -362,7 +362,7 @@ class GuildTags(commands.Cog):
                 if alert and not reward_ids & held:
                     await self._alert(member, row)
             else:
-                await self._remove_roles(member, roles)
+                await self._unequipped(member, roles)
                 removed += 1
         logger.info("Guild tag reconcile: added %s, removed %s", added, removed)
         return added, removed
@@ -391,7 +391,7 @@ class GuildTags(commands.Cog):
             logger.warning("Guild tag reward roles %s no longer exist", row.role_ids)
             return
         if after_id != Guild.id:
-            await self._remove_roles(member, roles)
+            await self._unequipped(member, roles)
             return
         await self._add_roles(member, roles)
         await self._alert(member, row)
@@ -432,6 +432,27 @@ class GuildTags(commands.Cog):
         except discord.HTTPException:
             logger.warning("Could not remove guild tag roles from %s", member.id)
 
+    async def _unequipped(self, member: discord.Member, roles: list[discord.Role]) -> None:
+        await self._remove_roles(member, roles)
+        await self._delete_alert(member.id)
+
+    async def _delete_alert(self, user_id: int) -> None:
+        if self.bot.db is None:
+            return
+        stored = await self.bot.db.take_guild_tag_alert(user_id)
+        if stored is None:
+            return
+        channel_id, message_id = stored
+        channel = self.bot.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+        try:
+            await channel.get_partial_message(message_id).delete()
+        except discord.NotFound:
+            return
+        except discord.HTTPException:
+            logger.warning("Could not delete guild tag alert for %s", user_id)
+
     async def _alert(self, member: discord.Member, row: GuildTag) -> None:
         if row.channel_id is None or not row.message.strip():
             return
@@ -446,13 +467,17 @@ class GuildTags(commands.Cog):
                 return
             channel = fetched
         text = format_alert(row.message, member)
+        await self._delete_alert(member.id)
         try:
-            await channel.send(
+            sent = await channel.send(
                 view=container_view(discord.ui.TextDisplay(text)),
                 allowed_mentions=USER_MENTIONS,
             )
         except discord.HTTPException:
             logger.warning("Could not send guild tag alert for %s", member.id)
+            return
+        if self.bot.db is not None:
+            await self.bot.db.store_guild_tag_alert(member.id, channel.id, sent.id)
 
 
 async def setup(bot: Aspect) -> None:

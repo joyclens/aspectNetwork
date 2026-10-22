@@ -56,7 +56,7 @@ def summary_text(promotion: Promotion) -> str:
         f"**Queue:** {TIER_LABELS[promotion.tier]}",
         f"**Status:** {promotion.status.title()}",
         f"**Slot:** {slot_text(promotion.slot)}",
-        f"-# <@&1529135830285684786>"
+        "-# <@&1529135830285684786>",
     ]
     if promotion.reviewer_id is not None and promotion.status in {
         STATUS_APPROVED,

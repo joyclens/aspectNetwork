@@ -1325,6 +1325,26 @@ class Database:
             json.dumps(role_ids),
         )
 
+    async def store_guild_tag_alert(self, user_id: int, channel_id: int, message_id: int) -> None:
+        await self._pool.execute(
+            """
+            INSERT INTO guild_tag_alerts (user_id, channel_id, message_id)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id)
+            DO UPDATE SET channel_id = EXCLUDED.channel_id, message_id = EXCLUDED.message_id
+            """,
+            user_id,
+            channel_id,
+            message_id,
+        )
+
+    async def take_guild_tag_alert(self, user_id: int) -> tuple[int, int] | None:
+        row = await self._pool.fetchrow(
+            "DELETE FROM guild_tag_alerts WHERE user_id = $1 RETURNING channel_id, message_id",
+            user_id,
+        )
+        return (int(row["channel_id"]), int(row["message_id"])) if row else None
+
     async def unclaimed_sales(
         self,
         group_id: int,
