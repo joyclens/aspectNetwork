@@ -199,6 +199,26 @@ class ClaimButton(ui.Button[Any]):
         await service.claim(interaction)
 
 
+class QueueButton(ui.Button[Any]):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Queue",
+            style=discord.ButtonStyle.secondary,
+            custom_id="marketplace:queue",
+            emoji=partial_emoji(Emojis.event),
+        )
+
+    async def callback(self, interaction: discord.Interaction[Any]) -> None:
+        service = getattr(interaction.client.get_cog("Promotions"), "service", None)
+        if service is None:
+            await interaction.response.send_message(
+                view=container_view(ui.TextDisplay("The queue is unavailable right now.")),
+                ephemeral=True,
+            )
+            return
+        await service.public_queue(interaction)
+
+
 class Marketplace(AspectLayout):
     def __init__(self) -> None:
         super().__init__(timeout=None)
@@ -216,11 +236,12 @@ class Marketplace(AspectLayout):
                 ui.Separator(visible=True, spacing=_SMALL),
                 ui.ActionRow(MarketplaceMenu()),
                 ui.Separator(visible=True, spacing=_SMALL),
-                ui.Section(
+                ui.TextDisplay(
                     "-# Bought a Sponsored Giveaway, Paid Advertisement or queue upgrade? "
-                    "Claim it here within 24 hours.",
-                    accessory=ClaimButton(),
+                    "Claim it here within 24 hours, or view the queue to see when you'd "
+                    "be posted."
                 ),
+                ui.ActionRow(ClaimButton(), QueueButton()),
                 ui.MediaGallery(discord.MediaGalleryItem(FOOTER)),
             )
         )
@@ -270,7 +291,7 @@ class MarketplaceCog(commands.Cog):
                     components = str(message.components)
                     if "marketplace:menu" in components:
                         self._panel_id = message.id
-                        if "marketplace:claim" not in components:
+                        if "marketplace:queue" not in components:
                             await message.edit(view=Marketplace())
                         return
             except discord.HTTPException:

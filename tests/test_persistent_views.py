@@ -39,6 +39,7 @@ EXPECTED_CUSTOM_IDS = frozenset(
         "dashboard:menu",
         "marketplace:menu",
         "marketplace:claim",
+        "marketplace:queue",
         "giveaway:join",
         "giveaway:participants",
         "giveaway:participants_ended",

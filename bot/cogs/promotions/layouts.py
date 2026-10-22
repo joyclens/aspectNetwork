@@ -80,22 +80,19 @@ def details_text(promotion: Promotion) -> str:
             f"**Winner Count:** {data.get('winners', '')}\n"
             f"**Duration:** `{data.get('duration', '')}`"
         )
-    quoted = "\n".join(f"> {line}" for line in str(data.get("text", "")).splitlines())
-    return f"**Advertisement:**\n{quoted}"
+    return "\n".join(f"> {line}" for line in str(data.get("text", "")).splitlines())
 
 
-def copyable_text(promotion: Promotion) -> str:
+def review_content(promotion: Promotion) -> str:
     data = promotion.data
-    if promotion.kind == KIND_GIVEAWAY:
-        body = (
-            f"Prize: {data.get('prize', '')}\n"
-            f"Server: {data.get('server', '')}\n"
-            f"Winners: {data.get('winners', '')}\n"
-            f"Duration: {data.get('duration', '')}"
-        )
-    else:
-        body = str(data.get("text", ""))
-    return "```\n" + body.replace("```", "`​``") + "\n```"
+    if promotion.kind != KIND_GIVEAWAY:
+        return str(data.get("text", ""))
+    return (
+        f"Prize: {data.get('prize', '')}\n"
+        f"Server: {data.get('server', '')}\n"
+        f"Winners: {data.get('winners', '')}\n"
+        f"Duration: {data.get('duration', '')}"
+    )
 
 
 def log_layout(promotion: Promotion) -> AspectLayout:
@@ -135,16 +132,6 @@ def ticket_container(promotion: Promotion) -> ui.Container[Any]:
     )
 
 
-def review_layout(promotion: Promotion) -> AspectLayout:
-    return container_view(
-        ui.TextDisplay(f"## Review {title(promotion)}"),
-        ui.Separator(visible=True, spacing=_SMALL),
-        ui.TextDisplay(summary_text(promotion)),
-        ui.Separator(visible=True, spacing=_SMALL),
-        ui.TextDisplay(copyable_text(promotion)),
-    )
-
-
 def notice_layout(heading: str, text: str) -> AspectLayout:
     return container_view(
         ui.TextDisplay(f"## {heading}\n{text}"),
@@ -163,6 +150,24 @@ def submit_layout(promotion: Promotion, heading: str, text: str) -> AspectLayout
             f"**Queue:** {TIER_LABELS[promotion.tier]}"
         ),
         ui.ActionRow(SubmitPromotionButton(promotion.id).item),
+        ui.Separator(visible=True, spacing=_SMALL),
+        ui.MediaGallery(discord.MediaGalleryItem(_FOOTER)),
+    )
+
+
+def submitted_layout(promotion: Promotion) -> AspectLayout:
+    return container_view(
+        ui.TextDisplay(
+            f"## {Emojis.approve} Details Submitted\n"
+            f"Your **{KIND_LABELS[promotion.kind]}** `#{promotion.id}` was sent to our "
+            "Management team. You'll get a DM once it's scheduled."
+        ),
+        ui.Separator(visible=True, spacing=_SMALL),
+        ui.TextDisplay(
+            f"**Item:** {KIND_LABELS[promotion.kind]}\n"
+            f"**Transaction:** `{promotion.transaction_id}`\n"
+            f"**Queue:** {TIER_LABELS[promotion.tier]}"
+        ),
         ui.Separator(visible=True, spacing=_SMALL),
         ui.MediaGallery(discord.MediaGalleryItem(_FOOTER)),
     )

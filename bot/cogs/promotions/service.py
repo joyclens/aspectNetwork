@@ -21,15 +21,17 @@ from bot.cogs.promotions.constants import (
     TIER_DAILY,
     TIER_LABELS,
     TIER_NORMAL,
+    TIER_PRIORITY,
     TIER_RANK,
 )
 from bot.cogs.promotions.layouts import (
     live_layout,
     log_layout,
     notice_layout,
-    review_layout,
+    review_content,
     slot_text,
     submit_layout,
+    submitted_layout,
     ticket_container,
 )
 from bot.cogs.promotions.models import (
@@ -57,6 +59,14 @@ Interaction = discord.Interaction[Any]
 
 def today() -> date:
     return datetime.now(UTC).date()
+
+
+class _QuietReply:
+    async def warn(self, text: str) -> None:
+        logger.warning("Promotion ticket claim: %s", text)
+
+    async def approve(self, text: str) -> None:
+        logger.info("Promotion ticket claim: %s", text)
 
 
 class PromotionService:
@@ -412,17 +422,18 @@ class PromotionService:
             await self.refresh(promotion)
             await self.reply(interaction, "Submission updated.")
             return
-        await interaction.response.defer(ephemeral=True)
         promotion = await db.submit_promotion(promotion_id, interaction.user.id, data)
         if promotion is None:
             await self.reply(interaction, "This purchase can no longer be submitted.")
             return
+        if interaction.message is not None:
+            await interaction.response.edit_message(view=submitted_layout(promotion))
+        else:
+            await interaction.response.send_message(
+                view=submitted_layout(promotion),
+                ephemeral=True,
+            )
         await self.publish_log(promotion)
-        await self.reply(
-            interaction,
-            f"{Emojis.approve} Your **{KIND_LABELS[promotion.kind]}** was submitted. "
-            "You'll get a DM once Management schedules it.",
-        )
 
     async def review(self, interaction: Interaction, promotion_id: int) -> None:
         promotion = await database(self.bot).promotion(promotion_id)
@@ -430,7 +441,7 @@ class PromotionService:
             await self.reply(interaction, "That submission no longer exists.")
             return
         await interaction.response.send_message(
-            view=review_layout(promotion),
+            review_content(promotion) or "No details have been submitted yet.",
             ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -493,7 +504,8 @@ class PromotionService:
             await self.reply(interaction, "This submission has already been reviewed.")
             return
         shifted = await self.push_back(promotion) if promotion.tier == TIER_DAILY else []
-        channel = await self.open_ticket(promotion)
+        approver = interaction.user if isinstance(interaction.user, discord.Member) else None
+        channel = await self.open_ticket(promotion, approver)
         if channel is not None:
             promotion = await db.promotion(promotion.id) or promotion
         await self.dm(
@@ -516,7 +528,11 @@ class PromotionService:
         )
         await self.reply(interaction, f"Approved for {slot_text(slot)}.{ticket}")
 
-    async def open_ticket(self, promotion: Promotion) -> discord.TextChannel | None:
+    async def open_ticket(
+        self,
+        promotion: Promotion,
+        approver: discord.Member | None,
+    ) -> discord.TextChannel | None:
         tickets = self.bot.get_cog("Tickets")
         guild = self.bot.get_guild(Guild.id)
         if not isinstance(tickets, Tickets) or guild is None:
@@ -538,8 +554,16 @@ class PromotionService:
         except discord.HTTPException:
             logger.warning("Could not open a promotion ticket for %s", promotion.id)
             return None
-        if channel is not None:
-            await database(self.bot).set_promotion_ticket(promotion.id, channel.id)
+        if channel is None:
+            return None
+        await database(self.bot).set_promotion_ticket(promotion.id, channel.id)
+        if approver is not None:
+            await tickets.claim_ticket(
+                channel,
+                approver,
+                reply=_QuietReply(),
+                panel=await tickets.find_ticket_panel(channel),
+            )
         return channel
 
     async def deny(self, interaction: Interaction, promotion_id: int, reason: str) -> None:
@@ -691,10 +715,11 @@ class PromotionService:
         return user.name if user is not None else f"User {promotion.owner_id}"
 
     async def queue_text(self) -> str:
-        queued = await database(self.bot).queued_promotions()
-        if not queued:
-            return "## Advertisement Queue\nThe queue is empty."
+        db = database(self.bot)
+        queued = await db.queued_promotions()
         lines = ["## Advertisement Queue"]
+        if not queued:
+            lines.append("The queue is empty.")
         for index, promotion in enumerate(queued, start=1):
             mark = "" if promotion.tier == TIER_NORMAL else "!"
             lines.append(
@@ -702,4 +727,24 @@ class PromotionService:
                 f"**{discord.utils.escape_markdown(await self.server_name(promotion))}{mark}** · "
                 f"{KIND_LABELS[promotion.kind]} · {TIER_LABELS[promotion.tier]}"
             )
+        last_slot = await db.last_promotion_slot()
+        lines.append("\n**If you purchase today, you'll be posted around:**")
+        for tier in (TIER_NORMAL, TIER_PRIORITY, TIER_DAILY):
+            lines.append(
+                f"- {TIER_LABELS[tier]}: {slot_text(suggest_slot(today(), last_slot, tier))}"
+            )
+        lines.append("-# `!` marks Priority and Daily Queue items. Dates are estimates.")
         return "\n".join(lines)[:4000]
+
+    async def public_queue(self, interaction: Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            text = await self.queue_text()
+        except DatabaseUnavailable as exc:
+            await report_interaction(interaction, exc, where="Database")
+            return
+        await interaction.followup.send(
+            view=container_view(ui.TextDisplay(text)),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
