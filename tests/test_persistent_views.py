@@ -15,6 +15,7 @@ from bot.cogs.packages.views import (
     ReportButton,
     ResendButton,
 )
+from bot.cogs.promotions.cog import DYNAMIC_ITEMS as PROMOTION_ITEMS
 from bot.cogs.tickets import Dashboard, ticket_panel_view
 from bot.events.verification import VerificationPanel
 from bot.shared.persistence import register_persistent, unregister_persistent
@@ -24,6 +25,7 @@ PERSISTENT_EXTENSIONS = (
     "bot.cogs.giveaways",
     "bot.cogs.marketplace",
     "bot.cogs.packages",
+    "bot.cogs.promotions",
     "bot.events.verification",
 )
 
@@ -36,6 +38,7 @@ EXPECTED_CUSTOM_IDS = frozenset(
         "support:gethelp",
         "dashboard:menu",
         "marketplace:menu",
+        "marketplace:claim",
         "giveaway:join",
         "giveaway:participants",
         "giveaway:participants_ended",
@@ -49,6 +52,7 @@ DYNAMIC_ITEMS = (
     PurchaseButton,
     ReportButton,
     ResendButton,
+    *PROMOTION_ITEMS,
 )
 
 

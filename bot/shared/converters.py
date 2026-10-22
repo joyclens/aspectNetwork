@@ -19,12 +19,17 @@ _UNITS = {
 }
 
 
+def parse_duration(argument: str) -> int | None:
+    match = _DURATION.fullmatch(argument.strip())
+    if match is None or not any(match.groups()):
+        return None
+    total = sum(int(match[name] or 0) * seconds for name, seconds in _UNITS.items())
+    return total if total > 0 else None
+
+
 class Duration(commands.Converter[int]):
     async def convert(self, ctx: commands.Context[Any], argument: str) -> int:
-        match = _DURATION.fullmatch(argument.strip())
-        if match is None or not any(match.groups()):
-            raise commands.BadArgument("That duration is not valid. Use `12h`, `1d`, `30m`.")
-        total = sum(int(match[name] or 0) * seconds for name, seconds in _UNITS.items())
-        if total <= 0:
+        total = parse_duration(argument)
+        if total is None:
             raise commands.BadArgument("That duration is not valid. Use `12h`, `1d`, `30m`.")
         return total

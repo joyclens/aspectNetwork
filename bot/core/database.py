@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +119,26 @@ class PackagerPackageEarnings:
     pending_sales: int
     pending_total: int
     paid_total: int
+
+
+@dataclass(frozen=True, slots=True)
+class Promotion:
+    id: int
+    kind: str
+    owner_id: int
+    roblox_id: int
+    transaction_id: int
+    status: str
+    tier: str
+    data: dict[str, Any]
+    log_message_id: int | None
+    ticket_channel_id: int | None
+    slot: date | None
+    alerted: bool
+    post_url: str | None
+    reviewer_id: int | None
+    created_at: datetime
+    approved_at: datetime | None
 
 
 def _ids(value: Any) -> list[int] | None:
@@ -262,6 +282,38 @@ def _payout(row: Any) -> PackagePayout:
         settled_at=row["settled_at"],
         created_at=row["created_at"],
     )
+
+
+def _optional_int(value: Any) -> int | None:
+    return int(value) if value is not None else None
+
+
+def _promotion(row: Any) -> Promotion:
+    data = row["data"]
+    if isinstance(data, str | bytes | bytearray):
+        data = json.loads(data)
+    return Promotion(
+        id=int(row["id"]),
+        kind=str(row["kind"]),
+        owner_id=int(row["owner_id"]),
+        roblox_id=int(row["roblox_id"]),
+        transaction_id=int(row["transaction_id"]),
+        status=str(row["status"]),
+        tier=str(row["tier"]),
+        data=data if isinstance(data, dict) else {},
+        log_message_id=_optional_int(row["log_message_id"]),
+        ticket_channel_id=_optional_int(row["ticket_channel_id"]),
+        slot=row["slot"],
+        alerted=bool(row["alerted"]),
+        post_url=str(row["post_url"]) if row["post_url"] is not None else None,
+        reviewer_id=_optional_int(row["reviewer_id"]),
+        created_at=row["created_at"],
+        approved_at=row["approved_at"],
+    )
+
+
+class _Rollback(Exception):
+    pass
 
 
 class Database:
@@ -1094,6 +1146,325 @@ class Database:
             reporter_id,
             issue,
         )
+
+    async def unclaimed_sales(
+        self,
+        group_id: int,
+        agent_id: int,
+        item_ids: list[int],
+    ) -> list[Sale]:
+        rows = await self._pool.fetch(
+            """
+            SELECT t.raw
+            FROM transactions t
+            LEFT JOIN promotion_claims c ON c.transaction_id = t.id
+            WHERE t.group_id = $1
+              AND t.kind = 'Sale'
+              AND t.agent_id = $2
+              AND t.item_id = ANY($3::bigint[])
+              AND c.transaction_id IS NULL
+            ORDER BY t.created_at ASC
+            """,
+            group_id,
+            agent_id,
+            item_ids,
+        )
+        return [sale for row in rows if (sale := _sale(row))]
+
+    async def unclaimed_known_buyers(
+        self,
+        group_id: int,
+        item_ids: list[int],
+    ) -> list[tuple[int, int]]:
+        rows = await self._pool.fetch(
+            """
+            SELECT DISTINCT ON (t.agent_id) p.owner_id, t.agent_id
+            FROM transactions t
+            JOIN promotions p ON p.roblox_id = t.agent_id
+            LEFT JOIN promotion_claims c ON c.transaction_id = t.id
+            WHERE t.group_id = $1
+              AND t.kind = 'Sale'
+              AND t.item_id = ANY($2::bigint[])
+              AND c.transaction_id IS NULL
+              AND t.created_at >= p.created_at
+            ORDER BY t.agent_id, p.created_at DESC
+            """,
+            group_id,
+            item_ids,
+        )
+        return [(int(row["owner_id"]), int(row["agent_id"])) for row in rows]
+
+    async def claim_promotion(
+        self,
+        transaction_id: int,
+        item_id: int,
+        kind: str,
+        owner_id: int,
+        roblox_id: int,
+    ) -> Promotion | None:
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                claimed = await connection.fetchval(
+                    """
+                    INSERT INTO promotion_claims (transaction_id, item_id, owner_id)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (transaction_id) DO NOTHING
+                    RETURNING transaction_id
+                    """,
+                    transaction_id,
+                    item_id,
+                    owner_id,
+                )
+                if claimed is None:
+                    return None
+                row = await connection.fetchrow(
+                    """
+                    INSERT INTO promotions (kind, owner_id, roblox_id, transaction_id)
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING *
+                    """,
+                    kind,
+                    owner_id,
+                    roblox_id,
+                    transaction_id,
+                )
+                await connection.execute(
+                    "UPDATE promotion_claims SET promotion_id = $1 WHERE transaction_id = $2",
+                    row["id"],
+                    transaction_id,
+                )
+                return _promotion(row)
+
+    async def claim_upgrade(
+        self,
+        transaction_id: int,
+        item_id: int,
+        owner_id: int,
+        promotion_id: int,
+        tier: str,
+        slot: date | None,
+    ) -> Promotion | None:
+        try:
+            async with self._pool.acquire() as connection:
+                async with connection.transaction():
+                    claimed = await connection.fetchval(
+                        """
+                        INSERT INTO promotion_claims (
+                            transaction_id, item_id, owner_id, promotion_id
+                        ) VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (transaction_id) DO NOTHING
+                        RETURNING transaction_id
+                        """,
+                        transaction_id,
+                        item_id,
+                        owner_id,
+                        promotion_id,
+                    )
+                    if claimed is None:
+                        return None
+                    row = await connection.fetchrow(
+                        """
+                        UPDATE promotions
+                        SET tier = $2,
+                            slot = COALESCE($3::date, slot),
+                            alerted = CASE WHEN $3::date IS NULL THEN alerted ELSE FALSE END
+                        WHERE id = $1
+                          AND owner_id = $4
+                          AND status IN ('claimed', 'submitted', 'approved')
+                        RETURNING *
+                        """,
+                        promotion_id,
+                        tier,
+                        slot,
+                        owner_id,
+                    )
+                    if row is None:
+                        raise _Rollback()
+                    return _promotion(row)
+        except _Rollback:
+            return None
+
+    async def promotion(self, promotion_id: int) -> Promotion | None:
+        row = await self._pool.fetchrow("SELECT * FROM promotions WHERE id = $1", promotion_id)
+        return _promotion(row) if row else None
+
+    async def promotion_by_ticket(self, channel_id: int) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            "SELECT * FROM promotions WHERE ticket_channel_id = $1",
+            channel_id,
+        )
+        return _promotion(row) if row else None
+
+    async def active_promotion(self, owner_id: int) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            """
+            SELECT * FROM promotions
+            WHERE owner_id = $1 AND status IN ('claimed', 'submitted', 'approved')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            owner_id,
+        )
+        return _promotion(row) if row else None
+
+    async def unsubmitted_promotions(self, owner_id: int) -> list[Promotion]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM promotions
+            WHERE owner_id = $1 AND status IN ('claimed', 'denied')
+            ORDER BY created_at ASC
+            """,
+            owner_id,
+        )
+        return [_promotion(row) for row in rows]
+
+    async def submit_promotion(
+        self,
+        promotion_id: int,
+        owner_id: int,
+        data: dict[str, Any],
+    ) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE promotions
+            SET data = $3::jsonb, status = 'submitted'
+            WHERE id = $1 AND owner_id = $2 AND status IN ('claimed', 'denied')
+            RETURNING *
+            """,
+            promotion_id,
+            owner_id,
+            json.dumps(data),
+        )
+        return _promotion(row) if row else None
+
+    async def edit_promotion(self, promotion_id: int, data: dict[str, Any]) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE promotions
+            SET data = $2::jsonb
+            WHERE id = $1 AND status IN ('submitted', 'approved')
+            RETURNING *
+            """,
+            promotion_id,
+            json.dumps(data),
+        )
+        return _promotion(row) if row else None
+
+    async def approve_promotion(
+        self,
+        promotion_id: int,
+        slot: date,
+        reviewer_id: int,
+    ) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE promotions
+            SET status = 'approved', slot = $2, reviewer_id = $3,
+                approved_at = NOW(), alerted = FALSE
+            WHERE id = $1 AND status = 'submitted'
+            RETURNING *
+            """,
+            promotion_id,
+            slot,
+            reviewer_id,
+        )
+        return _promotion(row) if row else None
+
+    async def deny_promotion(self, promotion_id: int, reviewer_id: int) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE promotions
+            SET status = 'denied', reviewer_id = $2
+            WHERE id = $1 AND status = 'submitted'
+            RETURNING *
+            """,
+            promotion_id,
+            reviewer_id,
+        )
+        return _promotion(row) if row else None
+
+    async def set_promotion_slot(self, promotion_id: int, slot: date) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE promotions
+            SET slot = $2, alerted = FALSE
+            WHERE id = $1 AND status = 'approved'
+            RETURNING *
+            """,
+            promotion_id,
+            slot,
+        )
+        return _promotion(row) if row else None
+
+    async def shift_promotion_slots(
+        self,
+        start: date,
+        days: int,
+        exclude_id: int,
+    ) -> list[Promotion]:
+        rows = await self._pool.fetch(
+            """
+            UPDATE promotions
+            SET slot = slot + $2::int, alerted = FALSE
+            WHERE status = 'approved' AND slot >= $1 AND id <> $3
+            RETURNING *
+            """,
+            start,
+            days,
+            exclude_id,
+        )
+        return [_promotion(row) for row in rows]
+
+    async def set_promotion_log(self, promotion_id: int, message_id: int) -> None:
+        await self._pool.execute(
+            "UPDATE promotions SET log_message_id = $2 WHERE id = $1",
+            promotion_id,
+            message_id,
+        )
+
+    async def set_promotion_ticket(self, promotion_id: int, channel_id: int) -> None:
+        await self._pool.execute(
+            "UPDATE promotions SET ticket_channel_id = $2 WHERE id = $1",
+            promotion_id,
+            channel_id,
+        )
+
+    async def due_promotions(self, today: date) -> list[Promotion]:
+        rows = await self._pool.fetch(
+            """
+            UPDATE promotions
+            SET alerted = TRUE
+            WHERE status = 'approved' AND slot <= $1 AND NOT alerted
+            RETURNING *
+            """,
+            today,
+        )
+        return [_promotion(row) for row in rows]
+
+    async def mark_promotion_posted(self, promotion_id: int, url: str) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE promotions
+            SET status = 'posted', post_url = $2
+            WHERE id = $1 AND status = 'approved'
+            RETURNING *
+            """,
+            promotion_id,
+            url,
+        )
+        return _promotion(row) if row else None
+
+    async def queued_promotions(self) -> list[Promotion]:
+        rows = await self._pool.fetch(
+            "SELECT * FROM promotions WHERE status = 'approved' ORDER BY slot ASC, id ASC"
+        )
+        return [_promotion(row) for row in rows]
+
+    async def last_promotion_slot(self) -> date | None:
+        value = await self._pool.fetchval(
+            "SELECT MAX(slot) FROM promotions WHERE status = 'approved'"
+        )
+        return value if isinstance(value, date) else None
 
 
 async def connect(dsn: str) -> tuple[Database, str]:

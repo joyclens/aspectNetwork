@@ -38,7 +38,7 @@ from bot.core.bot import Aspect
 from bot.core.database import Package, PackagePurchase
 from bot.core.ids import App, Channels, Guild, Roles
 from bot.services.dock import DockError
-from bot.shared.checks import database
+from bot.shared.checks import database, has_role, is_management
 from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")
@@ -82,19 +82,13 @@ class PackageService:
         self.drafts.pop(user_id, None)
 
     def has_role(self, member: discord.Member, role_id: int) -> bool:
-        if role_id < 1:
-            return False
-        if member.guild_permissions.administrator:
-            return True
-        return member.get_role(role_id) is not None or any(
-            role.id == role_id for role in member.roles
-        )
+        return has_role(member, role_id)
 
     def is_packager(self, member: discord.Member) -> bool:
-        return self.has_role(member, Roles.packager)
+        return has_role(member, Roles.packager)
 
     def is_management(self, member: discord.Member) -> bool:
-        return self.has_role(member, Roles.management)
+        return is_management(member)
 
     def can_submit(self, member: discord.Member) -> bool:
         return self.is_packager(member) or self.is_management(member)

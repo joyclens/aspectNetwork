@@ -247,6 +247,7 @@ def ticket_message(
     reason: str,
     *,
     claimed: bool = False,
+    extra: ui.Container[Any] | None = None,
 ) -> AspectLayout:
     view = AspectLayout(timeout=None)
     view.add_item(
@@ -265,6 +266,8 @@ def ticket_message(
             ui.MediaGallery(discord.MediaGalleryItem(TICKET_FOOTER)),
         )
     )
+    if extra is not None:
+        view.add_item(extra)
     return view
 
 
@@ -751,22 +754,53 @@ class Tickets(commands.Cog):
                 ephemeral=True,
             )
             return
-        category = interaction.guild.get_channel(Channels.tickets_category)
-        support = interaction.guild.get_role(Roles.ticket_support)
-        me = interaction.guild.me
-        if not isinstance(category, discord.CategoryChannel) or support is None or me is None:
+        try:
+            channel = await self.create_ticket_channel(
+                interaction.guild,
+                interaction.user,
+                kind=kind,
+                reason=reason,
+            )
+        except discord.HTTPException:
+            logger.warning("Could not open a ticket for %s", interaction.user.id)
+            await interaction.followup.send(
+                view=container_view(ui.TextDisplay("I could not open a ticket.")),
+                ephemeral=True,
+            )
+            return
+        if channel is None:
             await interaction.followup.send(
                 view=container_view(ui.TextDisplay("Tickets are unavailable.")),
                 ephemeral=True,
             )
             return
+        await interaction.followup.send(
+            view=container_view(ui.TextDisplay(f"Opened {channel.mention}.")),
+            ephemeral=True,
+        )
+
+    async def create_ticket_channel(
+        self,
+        guild: discord.Guild,
+        owner: discord.Member,
+        *,
+        kind: str,
+        reason: str,
+        extra: ui.Container[Any] | None = None,
+    ) -> discord.TextChannel | None:
+        db = database(self.bot)
+        category = guild.get_channel(Channels.tickets_category)
+        support = guild.get_role(Roles.ticket_support)
+        me = guild.me
+        if not isinstance(category, discord.CategoryChannel) or support is None or me is None:
+            return None
         number = await db.next_ticket_number()
         overwrites: dict[
             discord.Role | discord.Member | discord.Object,
             discord.PermissionOverwrite,
         ] = {
-            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            owner: discord.PermissionOverwrite(
                 view_channel=True,
                 send_messages=True,
                 attach_files=True,
@@ -785,35 +819,18 @@ class Tickets(commands.Cog):
                 manage_messages=True,
             ),
         }
-        try:
-            channel = await category.create_text_channel(
-                name=ticket_channel_name(interaction.user.name, claimed=False),
-                overwrites=overwrites,
-                reason="Ticket opened",
-            )
-            await db.create_ticket(
-                channel.id,
-                interaction.user.id,
-                number,
-                kind,
-                reason,
-            )
-            await channel.send(
-                f"{support.mention} | {interaction.user.mention}",
-                allowed_mentions=discord.AllowedMentions(roles=True, users=True),
-            )
-            await channel.send(view=ticket_message(number, interaction.user, reason))
-        except discord.HTTPException:
-            logger.warning("Could not open a ticket for %s", interaction.user.id)
-            await interaction.followup.send(
-                view=container_view(ui.TextDisplay("I could not open a ticket.")),
-                ephemeral=True,
-            )
-            return
-        await interaction.followup.send(
-            view=container_view(ui.TextDisplay(f"Opened {channel.mention}.")),
-            ephemeral=True,
+        channel = await category.create_text_channel(
+            name=ticket_channel_name(owner.name, claimed=False),
+            overwrites=overwrites,
+            reason="Ticket opened",
         )
+        await db.create_ticket(channel.id, owner.id, number, kind, reason)
+        await channel.send(
+            f"{support.mention} | {owner.mention}",
+            allowed_mentions=discord.AllowedMentions(roles=True, users=True),
+        )
+        await channel.send(view=ticket_message(number, owner, reason, extra=extra))
+        return channel
 
     def _button_reply(self, interaction: discord.Interaction[Any]) -> Any:
         class Reply:
@@ -956,12 +973,40 @@ class Tickets(commands.Cog):
     ) -> None:
         if panel is None:
             return
+        extra = await self.ticket_extra(ticket.channel_id)
         try:
             await panel.edit(
-                view=ticket_message(ticket.number, owner, ticket.reason, claimed=claimed)
+                view=ticket_message(
+                    ticket.number,
+                    owner,
+                    ticket.reason,
+                    claimed=claimed,
+                    extra=extra,
+                )
             )
         except discord.HTTPException:
             logger.warning("Could not refresh ticket panel %s", panel.id)
+
+    async def ticket_extra(self, channel_id: int) -> ui.Container[Any] | None:
+        builder = getattr(self.bot.get_cog("Promotions"), "ticket_extra", None)
+        return await builder(channel_id) if builder is not None else None
+
+    async def refresh_ticket_panel(self, channel: discord.TextChannel) -> None:
+        ticket = await database(self.bot).ticket(channel.id)
+        if ticket is None:
+            return
+        owner: discord.abc.User | None = channel.guild.get_member(ticket.owner_id)
+        if owner is None:
+            try:
+                owner = await self.bot.fetch_user(ticket.owner_id)
+            except discord.HTTPException:
+                return
+        await self._refresh_panel(
+            await self.find_ticket_panel(channel),
+            ticket,
+            owner,
+            claimed=ticket.claimed_by is not None,
+        )
 
     async def claim_ticket(
         self,

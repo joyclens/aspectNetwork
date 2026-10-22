@@ -52,8 +52,6 @@ class _Secrets:
     def dock_pid(self) -> str | None:
         return "PID-flQ6DFUt"
 
-   
-
     @property
     def cookie_api_key(self) -> str | None:
         raw = (os.environ.get("COOKIE_API_KEY") or self._cookie_api_key).strip()
@@ -82,6 +80,7 @@ class Channels:
     marketplace: Final[int] = 1529142741110358027
     ticket_logs: Final[int] = 1554248401325916240
     purchase_logs: Final[int] = 1530650718183358495
+    bot_logs: Final[int] = 1530635619586412757
 
     package_submissions: Final[int] = 1530635619586412757
     package_storage: Final[int] = 1530635619586412757

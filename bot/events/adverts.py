@@ -14,9 +14,7 @@ from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")
 
-FOOTER = (
-    "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png?ex=6ad54760&is=6ad3f5e0&hm=a620cfc6a45f8943e51320363b156c32491524ee8f70116a5cc52fa43faa96c3&"
-)
+FOOTER = "https://cdn.discordapp.com/attachments/1553889994538750133/1553895411410800656/Screenshot_2026-09-27_at_4.25.15_PM.png?ex=6ad54760&is=6ad3f5e0&hm=a620cfc6a45f8943e51320363b156c32491524ee8f70116a5cc52fa43faa96c3&"
 
 INVITE_RE = re.compile(
     r"(?i)(?:https?://)?(?:www\.)?(?:discord(?:app)?\.com/invite|discord\.gg)/([a-z0-9-]+)"
