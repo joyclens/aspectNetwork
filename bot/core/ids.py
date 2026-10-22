@@ -81,6 +81,7 @@ class Channels:
     ticket_logs: Final[int] = 1554248401325916240
     purchase_logs: Final[int] = 1530650718183358495
     bot_logs: Final[int] = 1530635619586412757
+    invite_logs: Final[int] = 0
 
     package_submissions: Final[int] = 1530635619586412757
     package_storage: Final[int] = 1530635619586412757

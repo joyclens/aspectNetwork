@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import io
 import logging
 import re
 from typing import Any
 
-import aiohttp
 import discord
 from discord import app_commands, ui
 from discord.ext import commands
@@ -554,46 +552,88 @@ class Tickets(commands.Cog):
 
     @ticket.command(  # type: ignore[arg-type]
         name="add",
-        description="Add a member to the current ticket.",
+        description="Add a member or role to the current ticket.",
     )
-    @app_commands.describe(user="Member to add")
-    async def add(self, ctx: commands.Context[Any], user: discord.Member) -> None:
+    @app_commands.describe(user="Member to add", role="Role to add")
+    async def add(
+        self,
+        ctx: commands.Context[Any],
+        user: discord.Member | None = None,
+        role: discord.Role | None = None,
+    ) -> None:
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
             await ctx.warn("You cannot manage tickets.")
+            return
+        if user is None and role is None:
+            await ctx.warn("Choose a member or a role to add.")
+            return
+        if role is not None and role.is_default():
+            await ctx.warn("You cannot add @everyone to a ticket.")
             return
         if await self.require_ticket(ctx) is None:
             return
         if not isinstance(ctx.channel, discord.TextChannel):
             return
-        await ctx.channel.set_permissions(
-            user,
-            view_channel=True,
-            send_messages=True,
-            attach_files=True,
-            embed_links=True,
-            reason="Added to ticket",
+        added: list[str] = []
+        for target in (user, role):
+            if target is None:
+                continue
+            await ctx.channel.set_permissions(
+                target,
+                view_channel=True,
+                send_messages=True,
+                attach_files=True,
+                embed_links=True,
+                reason="Added to ticket",
+            )
+            added.append(target.mention)
+        await ctx.send(
+            view=container_view(
+                ui.TextDisplay(f"{Emojis.approve} Added {' and '.join(added)} to the ticket.")
+            ),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
-        await ctx.approve(f"Added **{user.display_name}** to the ticket.")
 
     @ticket.command(  # type: ignore[arg-type]
         name="remove",
-        description="Remove a member from the current ticket.",
+        description="Remove a member or role from the current ticket.",
     )
-    @app_commands.describe(user="Member to remove")
-    async def remove(self, ctx: commands.Context[Any], user: discord.Member) -> None:
+    @app_commands.describe(user="Member to remove", role="Role to remove")
+    async def remove(
+        self,
+        ctx: commands.Context[Any],
+        user: discord.Member | None = None,
+        role: discord.Role | None = None,
+    ) -> None:
         ctx = require_context(ctx)
         if not isinstance(ctx.author, discord.Member) or not self.is_staff(ctx.author):
             await ctx.warn("You cannot manage tickets.")
             return
+        if user is None and role is None:
+            await ctx.warn("Choose a member or a role to remove.")
+            return
         ticket = await self.require_ticket(ctx)
         if ticket is None or not isinstance(ctx.channel, discord.TextChannel):
             return
-        if user.id == ticket.owner_id:
+        if user is not None and user.id == ticket.owner_id:
             await ctx.warn("You cannot remove the ticket owner.")
             return
-        await ctx.channel.set_permissions(user, overwrite=None, reason="Removed from ticket")
-        await ctx.approve(f"Removed **{user.display_name}** from the ticket.")
+        if role is not None and (role.is_default() or role.id == Roles.ticket_support):
+            await ctx.warn("You cannot remove that role from a ticket.")
+            return
+        removed: list[str] = []
+        for target in (user, role):
+            if target is None:
+                continue
+            await ctx.channel.set_permissions(target, overwrite=None, reason="Removed from ticket")
+            removed.append(target.mention)
+        await ctx.send(
+            view=container_view(
+                ui.TextDisplay(f"{Emojis.approve} Removed {' and '.join(removed)} from the ticket.")
+            ),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @ticket.command(  # type: ignore[arg-type]
         name="rename",
@@ -1205,7 +1245,7 @@ class Tickets(commands.Cog):
         closed_view.add_item(ui.Container(*items))
         if isinstance(logs, discord.TextChannel):
             try:
-                await logs.send(view=closed_view)
+                await logs.send(view=closed_view, allowed_mentions=discord.AllowedMentions.none())
             except discord.HTTPException:
                 logger.warning("Could not send ticket log")
         await self._dm_owner_closed(ticket, owner, closer, url)
@@ -1214,22 +1254,6 @@ class Tickets(commands.Cog):
             await channel.delete(reason="Ticket closed")
         except discord.HTTPException:
             logger.warning("Could not delete ticket channel %s", channel.id)
-
-    async def _transcript_attachment(self, url: str, number: int) -> discord.File | None:
-        session = self.bot.session
-        if session is None or session.closed:
-            return None
-        try:
-            async with session.get(url) as response:
-                if response.status >= 300:
-                    await response.read()
-                    return None
-                data = await response.read()
-        except (aiohttp.ClientError, OSError, TimeoutError):
-            return None
-        if not data:
-            return None
-        return discord.File(io.BytesIO(data), filename=f"ticket-{number:03d}.html")
 
     async def _dm_owner_closed(
         self,
@@ -1259,18 +1283,15 @@ class Tickets(commands.Cog):
             ui.TextDisplay(text),
             ui.Separator(visible=True),
         ]
-        files: list[discord.File] = []
         if url is not None:
-            uploaded = await self._transcript_attachment(url, ticket.number)
-            if uploaded is not None:
-                items.append(ui.File(uploaded.uri))
-                files.append(uploaded)
-            else:
-                items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
+            items.append(ui.ActionRow(ui.Button(label="View Transcript", url=url)))
         items.append(ui.Separator(visible=True))
         items.append(ui.MediaGallery(discord.MediaGalleryItem(FOOTER)))
         try:
-            await user.send(view=container_view(*items), files=files)
+            await user.send(
+                view=container_view(*items),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except discord.HTTPException:
             logger.warning("Could not DM ticket owner %s", ticket.owner_id)
 

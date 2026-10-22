@@ -159,6 +159,28 @@ class Promotion:
     approved_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class InviteJoin:
+    user_id: int
+    inviter_id: int | None
+    invite_code: str | None
+    how: str
+    joined_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class InviteCount:
+    user_id: int
+    regular: int
+    left: int
+
+
+@dataclass(frozen=True, slots=True)
+class InviteReward:
+    threshold: int
+    role_id: int
+
+
 def _ids(value: Any) -> list[int] | None:
     if value is None:
         return None
@@ -327,6 +349,24 @@ def _promotion(row: Any) -> Promotion:
         reviewer_id=_optional_int(row["reviewer_id"]),
         created_at=row["created_at"],
         approved_at=row["approved_at"],
+    )
+
+
+def _invite_join(row: Any) -> InviteJoin:
+    return InviteJoin(
+        user_id=int(row["user_id"]),
+        inviter_id=_optional_int(row["inviter_id"]),
+        invite_code=str(row["invite_code"]) if row["invite_code"] is not None else None,
+        how=str(row["how"]),
+        joined_at=row["joined_at"],
+    )
+
+
+def _invite_count(row: Any) -> InviteCount:
+    return InviteCount(
+        user_id=int(row["user_id"]),
+        regular=int(row["regular_count"]),
+        left=int(row["left_count"]),
     )
 
 
@@ -1604,6 +1644,125 @@ class Database:
             "SELECT MAX(slot) FROM promotions WHERE status = 'approved'"
         )
         return value if isinstance(value, date) else None
+
+    async def invite_count(self, user_id: int) -> InviteCount:
+        row = await self._pool.fetchrow(
+            "SELECT * FROM invite_counts WHERE user_id = $1",
+            user_id,
+        )
+        return _invite_count(row) if row else InviteCount(user_id=user_id, regular=0, left=0)
+
+    async def invite_leaderboard(self, limit: int) -> list[InviteCount]:
+        rows = await self._pool.fetch(
+            """
+            SELECT * FROM invite_counts
+            WHERE regular_count > 0 OR left_count > 0
+            ORDER BY regular_count DESC, left_count ASC
+            LIMIT $1
+            """,
+            limit,
+        )
+        return [_invite_count(row) for row in rows]
+
+    async def invite_counts(self) -> list[InviteCount]:
+        rows = await self._pool.fetch("SELECT * FROM invite_counts")
+        return [_invite_count(row) for row in rows]
+
+    async def record_invite_join(
+        self,
+        user_id: int,
+        inviter_id: int | None,
+        code: str | None,
+        how: str,
+    ) -> int | None:
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                inserted = await connection.fetchval(
+                    """
+                    INSERT INTO invite_joins (user_id, inviter_id, invite_code, how)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (user_id) DO NOTHING
+                    RETURNING user_id
+                    """,
+                    user_id,
+                    inviter_id,
+                    code,
+                    how,
+                )
+                if inserted is None or inviter_id is None or inviter_id == user_id:
+                    return None
+                value = await connection.fetchval(
+                    """
+                    INSERT INTO invite_counts (user_id, regular_count)
+                    VALUES ($1, 1)
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET regular_count = invite_counts.regular_count + 1
+                    RETURNING regular_count
+                    """,
+                    inviter_id,
+                )
+                return int(value)
+
+    async def record_invite_leave(self, user_id: int) -> tuple[int, int] | None:
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                inviter_id = await connection.fetchval(
+                    "DELETE FROM invite_joins WHERE user_id = $1 RETURNING inviter_id",
+                    user_id,
+                )
+                if inviter_id is None or int(inviter_id) == user_id:
+                    return None
+                value = await connection.fetchval(
+                    """
+                    UPDATE invite_counts
+                    SET regular_count = GREATEST(regular_count - 1, 0),
+                        left_count = left_count + 1
+                    WHERE user_id = $1
+                    RETURNING regular_count
+                    """,
+                    inviter_id,
+                )
+                if value is None:
+                    return None
+                return int(inviter_id), int(value)
+
+    async def invite_join(self, user_id: int) -> InviteJoin | None:
+        row = await self._pool.fetchrow("SELECT * FROM invite_joins WHERE user_id = $1", user_id)
+        return _invite_join(row) if row else None
+
+    async def invited_by(self, inviter_id: int) -> list[InviteJoin]:
+        rows = await self._pool.fetch(
+            "SELECT * FROM invite_joins WHERE inviter_id = $1 ORDER BY joined_at DESC",
+            inviter_id,
+        )
+        return [_invite_join(row) for row in rows]
+
+    async def invite_rewards(self) -> list[InviteReward]:
+        rows = await self._pool.fetch("SELECT * FROM invite_rewards ORDER BY threshold ASC")
+        return [
+            InviteReward(threshold=int(row["threshold"]), role_id=int(row["role_id"]))
+            for row in rows
+        ]
+
+    async def add_invite_reward(self, threshold: int, role_id: int) -> bool:
+        value = await self._pool.fetchval(
+            """
+            INSERT INTO invite_rewards (threshold, role_id)
+            VALUES ($1, $2)
+            ON CONFLICT (threshold) DO NOTHING
+            RETURNING threshold
+            """,
+            threshold,
+            role_id,
+        )
+        return value is not None
+
+    async def remove_invite_reward(self, threshold: int) -> bool:
+        value = await self._pool.fetchval(
+            "DELETE FROM invite_rewards WHERE threshold = $1 RETURNING threshold",
+            threshold,
+        )
+        return value is not None
 
 
 def _sticky(row: Any) -> StickyMessage:

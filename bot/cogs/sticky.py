@@ -79,7 +79,7 @@ class Sticky(commands.Cog):
         ctx = require_context(ctx)
         if ctx.guild is None:
             return
-        text = " ".join(message.split())
+        text = message.replace("\\n", "\n").strip()
         if not text or len(text) > MAX_MESSAGE:
             await ctx.warn("That sticky message is not valid.")
             return
@@ -134,10 +134,7 @@ class Sticky(commands.Cog):
             except discord.HTTPException:
                 pass
         try:
-            posted = await channel.send(
-                view=container_view(discord.ui.TextDisplay(text)),
-                allowed_mentions=NO_MENTIONS,
-            )
+            posted = await channel.send(text, allowed_mentions=NO_MENTIONS)
         except discord.HTTPException:
             logger.warning("Could not post sticky message in %s", channel.id)
             return

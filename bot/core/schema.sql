@@ -206,3 +206,24 @@ CREATE TABLE IF NOT EXISTS promotion_claims (
     promotion_id BIGINT REFERENCES promotions (id),
     claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS invite_counts (
+    user_id BIGINT PRIMARY KEY,
+    regular_count INTEGER NOT NULL DEFAULT 0,
+    left_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS invite_joins (
+    user_id BIGINT PRIMARY KEY,
+    inviter_id BIGINT,
+    invite_code TEXT,
+    how TEXT NOT NULL,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS invite_joins_inviter_idx ON invite_joins (inviter_id);
+
+CREATE TABLE IF NOT EXISTS invite_rewards (
+    threshold INTEGER PRIMARY KEY,
+    role_id BIGINT NOT NULL
+);
