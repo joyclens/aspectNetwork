@@ -1545,7 +1545,7 @@ class Database:
             """
             UPDATE promotions
             SET slot = slot + $2::int, alerted = FALSE
-            WHERE status = 'approved' AND slot >= $1 AND id <> $3
+            WHERE status = 'approved' AND tier = 'normal' AND slot >= $1 AND id <> $3
             RETURNING *
             """,
             start,

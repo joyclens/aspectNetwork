@@ -9,11 +9,11 @@ from discord import ui
 
 from bot.cogs.promotions.constants import (
     AUTO_CLAIM_SINCE,
-    DAILY_PUSH_DAYS,
     ITEMS,
     KIND_ADVERT,
     KIND_LABELS,
     KINDS,
+    PUSH_BACK_DAYS,
     STATUS_APPROVED,
     STATUS_CLAIMED,
     STATUS_DENIED,
@@ -282,7 +282,7 @@ class PromotionService:
             tier,
             sale.id,
         )
-        shifted = await self.push_back(updated) if tier == TIER_DAILY else []
+        shifted = await self.push_back(updated) if tier != TIER_NORMAL else []
         text = (
             f"Your **{KIND_LABELS[updated.kind]}** `#{updated.id}` was upgraded to the **{label}**."
         )
@@ -301,7 +301,7 @@ class PromotionService:
         )
         await self.refresh(updated)
         for other in shifted:
-            await self.notify_slot(other, moved_by_daily=True)
+            await self.notify_slot(other, pushed_back=True)
         return f"{Emojis.approve} {text}"
 
     async def push_back(self, promotion: Promotion) -> list[Promotion]:
@@ -309,15 +309,17 @@ class PromotionService:
             return []
         shifted = await database(self.bot).shift_promotion_slots(
             promotion.slot,
-            DAILY_PUSH_DAYS,
+            PUSH_BACK_DAYS,
             promotion.id,
         )
         for other in shifted:
             await self.refresh(other)
         return shifted
 
-    async def notify_slot(self, promotion: Promotion, *, moved_by_daily: bool = False) -> None:
-        reason = " because a Daily Queue item was added ahead of it" if moved_by_daily else ""
+    async def notify_slot(self, promotion: Promotion, *, pushed_back: bool = False) -> None:
+        reason = (
+            " because a Priority or Daily Queue item was added ahead of it" if pushed_back else ""
+        )
         await self.dm(
             promotion.owner_id,
             notice_layout(
@@ -503,7 +505,7 @@ class PromotionService:
         if promotion is None:
             await self.reply(interaction, "This submission has already been reviewed.")
             return
-        shifted = await self.push_back(promotion) if promotion.tier == TIER_DAILY else []
+        shifted = await self.push_back(promotion) if promotion.tier != TIER_NORMAL else []
         approver = interaction.user if isinstance(interaction.user, discord.Member) else None
         channel = await self.open_ticket(promotion, approver)
         if channel is not None:
@@ -520,7 +522,7 @@ class PromotionService:
         )
         await self.publish_log(promotion)
         for other in shifted:
-            await self.notify_slot(other, moved_by_daily=True)
+            await self.notify_slot(other, pushed_back=True)
         ticket = (
             f" Ticket: {channel.mention}."
             if channel is not None
