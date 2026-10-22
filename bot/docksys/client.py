@@ -19,6 +19,7 @@ from bot.docksys.errors import (
 from bot.docksys.models import (
     BulkLookupResponse,
     DiscordLookup,
+    RobloxLookup,
     SessionCreated,
     SessionState,
     V2ErrorEnvelope,
@@ -72,6 +73,26 @@ class DockClient:
         if not roblox_id.isdigit() or int(roblox_id) < 1:
             return None
         return str(int(roblox_id))
+
+    async def linked_discord(self, roblox_id: int, guild_id: int) -> list[int]:
+        if roblox_id < 1 or guild_id < 1:
+            raise DockError(0, message="invalid roblox or guild id")
+        try:
+            data = await self._data(
+                "GET",
+                "/v2/roblox",
+                params={
+                    "robloxId": str(roblox_id),
+                    "guildId": str(guild_id),
+                },
+            )
+        except DockNotFoundError:
+            return []
+        try:
+            lookup = RobloxLookup.model_validate(data)
+        except ValidationError as exc:
+            raise DockError(0, message="invalid roblox lookup payload") from exc
+        return [int(item) for item in lookup.discord_ids if item.isdigit() and int(item) > 0]
 
     async def linked_roblox_bulk(
         self,

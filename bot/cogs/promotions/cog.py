@@ -72,7 +72,7 @@ class Promotions(commands.Cog):
     async def watch(self) -> None:
         if self.bot.db is None:
             return
-        await self.service.claim_known_buyers()
+        await self.service.auto_claim()
         await self.service.alert_due()
 
     @watch.before_loop

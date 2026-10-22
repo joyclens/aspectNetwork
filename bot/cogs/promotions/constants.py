@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 ITEM_GIVEAWAY = 134641402925074
 ITEM_ADVERT = 113272473148244
 ITEM_PRIORITY = 104447359521852
@@ -48,6 +50,7 @@ STATUS_DENIED = "denied"
 STATUS_POSTED = "posted"
 
 POLL_INTERVAL_SECONDS = 60
+AUTO_CLAIM_SINCE = datetime(2026, 10, 21, tzinfo=UTC)
 
 SUBMIT_TEMPLATE = r"promotion:submit:(?P<id>\d+)"
 APPROVE_TEMPLATE = r"promotion:approve:(?P<id>\d+)"

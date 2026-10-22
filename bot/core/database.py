@@ -1309,28 +1309,29 @@ class Database:
         )
         return [sale for row in rows if (sale := _sale(row))]
 
-    async def unclaimed_known_buyers(
+    async def unclaimed_item_sales(
         self,
         group_id: int,
         item_ids: list[int],
-    ) -> list[tuple[int, int]]:
+        since: datetime,
+    ) -> list[Sale]:
         rows = await self._pool.fetch(
             """
-            SELECT DISTINCT ON (t.agent_id) p.owner_id, t.agent_id
+            SELECT t.raw
             FROM transactions t
-            JOIN promotions p ON p.roblox_id = t.agent_id
             LEFT JOIN promotion_claims c ON c.transaction_id = t.id
             WHERE t.group_id = $1
               AND t.kind = 'Sale'
               AND t.item_id = ANY($2::bigint[])
+              AND t.created_at >= $3
               AND c.transaction_id IS NULL
-              AND t.created_at >= p.created_at
-            ORDER BY t.agent_id, p.created_at DESC
+            ORDER BY t.created_at ASC
             """,
             group_id,
             item_ids,
+            since,
         )
-        return [(int(row["owner_id"]), int(row["agent_id"])) for row in rows]
+        return [sale for row in rows if (sale := _sale(row))]
 
     async def claim_promotion(
         self,

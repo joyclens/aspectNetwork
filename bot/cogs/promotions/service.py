@@ -8,6 +8,7 @@ import discord
 from discord import ui
 
 from bot.cogs.promotions.constants import (
+    AUTO_CLAIM_SINCE,
     DAILY_PUSH_DAYS,
     ITEMS,
     KIND_ADVERT,
@@ -62,6 +63,8 @@ class PromotionService:
     def __init__(self, bot: Aspect) -> None:
         self.bot = bot
         self._server_names: dict[str, str] = {}
+        self._owners: dict[int, int] = {}
+        self._reported: set[int] = set()
 
     async def reply(self, interaction: Interaction, text: str) -> None:
         view = container_view(ui.TextDisplay(text))
@@ -101,9 +104,32 @@ class PromotionService:
             return None
         try:
             linked = await dock.linked_roblox(user_id, Guild.id)
-        except DockError:
+        except DockError as exc:
+            logger.warning("Dock lookup for Discord %s failed status=%s", user_id, exc.status)
             return None
+        logger.info("Dock lookup Discord %s -> Roblox %s", user_id, linked)
         return int(linked) if linked is not None else None
+
+    async def linked_discord(self, roblox_id: int) -> tuple[int | None, str | None]:
+        if roblox_id in self._owners:
+            return self._owners[roblox_id], None
+        dock = self.bot.dock
+        if dock is None:
+            logger.warning("Dock is not connected, cannot match Roblox %s", roblox_id)
+            return None, None
+        try:
+            linked = await dock.linked_discord(roblox_id, Guild.id)
+        except DockError as exc:
+            logger.warning("Dock lookup for Roblox %s failed status=%s", roblox_id, exc.status)
+            return None, None
+        logger.info("Dock lookup Roblox %s -> Discord %s", roblox_id, linked)
+        if not linked:
+            return None, "This Roblox account is not linked to anyone in the server with Dock."
+        if len(linked) > 1:
+            accounts = ", ".join(f"<@{discord_id}>" for discord_id in linked)
+            return None, f"This Roblox account is linked to several Discord accounts: {accounts}."
+        self._owners[roblox_id] = linked[0]
+        return linked[0], None
 
     async def sync_recent_sales(self) -> None:
         ingest = getattr(self.bot.get_cog("Purchases"), "ingest_new_sales", None)
@@ -130,7 +156,7 @@ class PromotionService:
             )
             return
         await self.sync_recent_sales()
-        lines = await self.process_sales(interaction.user.id, roblox_id)
+        lines = [line for _, line in await self.process_sales(interaction.user.id, roblox_id)]
         waiting = await db.unsubmitted_promotions(interaction.user.id)
         if not lines and not waiting:
             await self.reply(
@@ -152,9 +178,9 @@ class PromotionService:
             )
         await interaction.followup.send(view=container_view(*items), ephemeral=True)
 
-    async def process_sales(self, owner_id: int, roblox_id: int) -> list[str]:
+    async def process_sales(self, owner_id: int, roblox_id: int) -> list[tuple[int, str]]:
         db = database(self.bot)
-        lines: list[str] = []
+        lines: list[tuple[int, str]] = []
         async with self.bot.lock_for(f"promotion-claim:{roblox_id}"):
             sales = [
                 sale
@@ -169,7 +195,7 @@ class PromotionService:
                 else:
                     line = await self.apply_upgrade(owner_id, sale, kind)
                 if line:
-                    lines.append(line)
+                    lines.append((sale.id, line))
         return lines
 
     async def claim_sale(self, owner_id: int, roblox_id: int, sale: Sale, kind: str) -> str | None:
@@ -192,6 +218,20 @@ class PromotionService:
                 "below to send it to our Management team.",
             ),
         )
+        logger.info(
+            "Claimed promotion #%s (%s) from transaction %s for %s, DM delivered=%s",
+            promotion.id,
+            kind,
+            sale.id,
+            owner_id,
+            delivered,
+        )
+        if not delivered:
+            await self.alert(
+                promotion,
+                f"{Emojis.warn} <@{owner_id}> claimed **{KIND_LABELS[kind]}** "
+                f"`#{promotion.id}` (transaction `{sale.id}`) but I could not DM them.",
+            )
         suffix = "" if delivered else " I could not DM you, so use the button below."
         return f"{Emojis.approve} Claimed **{KIND_LABELS[kind]}** (`{sale.id}`).{suffix}"
 
@@ -226,6 +266,12 @@ class PromotionService:
         )
         if updated is None:
             return None
+        logger.info(
+            "Upgraded promotion #%s to %s from transaction %s",
+            updated.id,
+            tier,
+            sale.id,
+        )
         shifted = await self.push_back(updated) if tier == TIER_DAILY else []
         text = (
             f"Your **{KIND_LABELS[updated.kind]}** `#{updated.id}` was upgraded to the **{label}**."
@@ -573,10 +619,59 @@ class PromotionService:
                 ),
             )
 
-    async def claim_known_buyers(self) -> None:
-        buyers = await database(self.bot).unclaimed_known_buyers(App.roblox_group_id, list(ITEMS))
-        for owner_id, roblox_id in buyers:
-            await self.process_sales(owner_id, roblox_id)
+    async def auto_claim(self) -> None:
+        sales = [
+            sale
+            for sale in await database(self.bot).unclaimed_item_sales(
+                App.roblox_group_id,
+                list(ITEMS),
+                AUTO_CLAIM_SINCE,
+            )
+            if sale.id not in self._reported
+        ]
+        for roblox_id in sorted({sale.agent_id for sale in sales}):
+            pending = [sale for sale in sales if sale.agent_id == roblox_id]
+            logger.info(
+                "Promotion auto-claim: %s unclaimed sale(s) from Roblox %s",
+                len(pending),
+                roblox_id,
+            )
+            owner_id, problem = await self.linked_discord(roblox_id)
+            if owner_id is None:
+                if problem is not None:
+                    await self.report_unmatched(pending, problem)
+                continue
+            for sale_id, line in await self.process_sales(owner_id, roblox_id):
+                if line.startswith(Emojis.warn):
+                    self._reported.add(sale_id)
+                    await self.dm(owner_id, notice_layout("Purchase Not Applied", line))
+
+    async def report_unmatched(self, sales: list[Sale], problem: str) -> None:
+        self._reported.update(sale.id for sale in sales)
+        channel = await self.channel(Channels.bot_logs)
+        if channel is None:
+            return
+        for sale in sales:
+            logger.info("Promotion sale %s could not be matched: %s", sale.id, problem)
+            try:
+                await channel.send(
+                    view=container_view(
+                        ui.TextDisplay(
+                            f"## {Emojis.warn} Unmatched Purchase\n"
+                            f"**Item:** {sale.item_name or sale.item_id}\n"
+                            f"**Transaction:** `{sale.id}`\n"
+                            f"**Roblox:** [{sale.agent_name}]"
+                            f"(https://www.roblox.com/users/{sale.agent_id}/profile) "
+                            f"`{sale.agent_id}`\n"
+                            f"**Reason:** {problem}\n"
+                            "-# The buyer can link with Dock and press **Claim Purchase** in "
+                            f"<#{Channels.marketplace}>."
+                        )
+                    ),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                logger.warning("Could not report unmatched promotion sale %s", sale.id)
 
     async def server_name(self, promotion: Promotion) -> str:
         source = str(promotion.data.get("server") or promotion.data.get("text") or "")

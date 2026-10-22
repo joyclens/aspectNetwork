@@ -247,6 +247,27 @@ async def test_bulk_lookup(client: DockClient, http: FakeSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_roblox_lookup(client: DockClient, http: FakeSession) -> None:
+    http.enqueue(
+        200,
+        _success(
+            {
+                "robloxId": "156319135",
+                "discordIds": ["10", "11"],
+                "count": 2,
+                "resolved": {"roblox": None, "discord": None},
+            }
+        ),
+    )
+    http.enqueue(404, _error(404, "LINK_NOT_FOUND", "Not found."))
+    assert await client.linked_discord(156319135, 99) == [10, 11]
+    assert http.calls[0]["method"] == "GET"
+    assert http.calls[0]["url"].endswith("/v2/roblox")
+    assert http.calls[0]["params"] == {"robloxId": "156319135", "guildId": "99"}
+    assert await client.linked_discord(1, 99) == []
+
+
+@pytest.mark.asyncio
 async def test_session_state_long_poll(client: DockClient, http: FakeSession) -> None:
     http.enqueue(
         200,

@@ -60,6 +60,15 @@ class DiscordLookup(BaseModel):
     resolved: dict[str, Any] | None = None
 
 
+class RobloxLookup(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    roblox_id: str = Field(alias="robloxId")
+    discord_ids: list[str] = Field(default_factory=list, alias="discordIds")
+    count: int = 0
+    resolved: dict[str, Any] | None = None
+
+
 class BulkItemError(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

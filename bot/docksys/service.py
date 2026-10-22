@@ -49,6 +49,9 @@ class Dock:
     async def linked_roblox(self, discord_id: int, guild_id: int) -> str | None:
         return await self.client.linked_roblox(discord_id, guild_id)
 
+    async def linked_discord(self, roblox_id: int, guild_id: int) -> list[int]:
+        return await self.client.linked_discord(roblox_id, guild_id)
+
     async def linked_roblox_bulk(
         self,
         discord_ids: list[int],
