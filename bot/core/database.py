@@ -1608,24 +1608,47 @@ class Database:
             channel_id,
         )
 
-    async def due_promotions(self, today: date) -> list[Promotion]:
+    async def approved_promotions_until(self, day: date) -> list[Promotion]:
         rows = await self._pool.fetch(
-            """
-            UPDATE promotions
-            SET alerted = TRUE
-            WHERE status = 'approved' AND slot <= $1 AND NOT alerted
-            RETURNING *
-            """,
-            today,
+            "SELECT * FROM promotions WHERE status = 'approved' AND slot <= $1 ORDER BY slot ASC",
+            day,
         )
         return [_promotion(row) for row in rows]
+
+    async def mark_promotion_alerted(self, promotion_id: int) -> bool:
+        value = await self._pool.fetchval(
+            """
+            UPDATE promotions SET alerted = TRUE
+            WHERE id = $1 AND status = 'approved' AND NOT alerted
+            RETURNING id
+            """,
+            promotion_id,
+        )
+        return value is not None
+
+    async def claim_promotion_post(self, promotion_id: int) -> Promotion | None:
+        row = await self._pool.fetchrow(
+            """
+            UPDATE promotions SET status = 'posting'
+            WHERE id = $1 AND status = 'approved'
+            RETURNING *
+            """,
+            promotion_id,
+        )
+        return _promotion(row) if row else None
+
+    async def release_promotion_post(self, promotion_id: int) -> None:
+        await self._pool.execute(
+            "UPDATE promotions SET status = 'approved' WHERE id = $1 AND status = 'posting'",
+            promotion_id,
+        )
 
     async def mark_promotion_posted(self, promotion_id: int, url: str) -> Promotion | None:
         row = await self._pool.fetchrow(
             """
             UPDATE promotions
             SET status = 'posted', post_url = $2
-            WHERE id = $1 AND status = 'approved'
+            WHERE id = $1 AND status IN ('approved', 'posting')
             RETURNING *
             """,
             promotion_id,

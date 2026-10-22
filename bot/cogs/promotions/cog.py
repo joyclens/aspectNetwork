@@ -73,7 +73,7 @@ class Promotions(commands.Cog):
         if self.bot.db is None:
             return
         await self.service.auto_claim()
-        await self.service.alert_due()
+        await self.service.schedule_posts()
 
     @watch.before_loop
     async def before_watch(self) -> None:

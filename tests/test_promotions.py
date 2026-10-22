@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -19,7 +19,9 @@ from bot.cogs.promotions.models import (
     invite_url,
     parse_date,
     picker_dates,
+    post_day,
     post_link,
+    post_time,
     robux_value,
     suggest_slot,
     upgraded_slot,
@@ -69,6 +71,16 @@ def test_upgrade_never_delays_or_moves_imminent_slots() -> None:
     assert upgraded_slot(TODAY, days(1), TIER_NORMAL, TIER_DAILY) == days(1)
     assert upgraded_slot(TODAY, TODAY, TIER_NORMAL, TIER_DAILY) == TODAY
     assert upgraded_slot(TODAY, days(2), TIER_NORMAL, TIER_DAILY) == days(1)
+
+
+def test_post_time_is_3pm_eastern() -> None:
+    assert post_time(date(2026, 10, 22)) == datetime(2026, 10, 22, 19, tzinfo=UTC)
+    assert post_time(date(2026, 12, 1)) == datetime(2026, 12, 1, 20, tzinfo=UTC)
+
+
+def test_post_day_uses_eastern_date() -> None:
+    assert post_day(datetime(2026, 10, 23, 2, tzinfo=UTC)) == date(2026, 10, 22)
+    assert post_day(datetime(2026, 10, 23, 5, tzinfo=UTC)) == date(2026, 10, 23)
 
 
 def test_picker_dates_cover_the_week() -> None:

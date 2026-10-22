@@ -408,6 +408,47 @@ async def handle_join(interaction: Interaction) -> None:
     await reply(interaction, text)
 
 
+async def start_giveaway(
+    bot: Aspect,
+    *,
+    channel: discord.TextChannel,
+    winners: int,
+    finish: datetime,
+    host_id: int,
+    title: str,
+    required_roles: list[int] | None = None,
+    ignore_roles: list[int] | None = None,
+    required_servers: list[SponsoredServer] | None = None,
+) -> discord.Message:
+    draft = Giveaway(
+        message_id=0,
+        guild_id=channel.guild.id,
+        channel_id=channel.id,
+        winners=winners,
+        members=[],
+        finish=finish,
+        host_id=host_id,
+        title=title,
+        required_roles=required_roles,
+        ignore_roles=ignore_roles,
+        required_servers=required_servers,
+    )
+    message = await channel.send(view=giveaway_layout(draft))
+    await database(bot).create_giveaway(
+        message_id=message.id,
+        guild_id=channel.guild.id,
+        channel_id=channel.id,
+        winners=winners,
+        finish=finish,
+        host_id=host_id,
+        title=title,
+        required_roles=required_roles,
+        ignore_roles=ignore_roles,
+        required_servers=required_servers,
+    )
+    return message
+
+
 async def fetch_message(bot: Aspect, row: Giveaway) -> discord.Message | None:
     guild = bot.get_guild(row.guild_id)
     if guild is None:
@@ -667,27 +708,11 @@ class Giveaways(commands.Cog):
                 await ctx.warn(f"You can only set up to {MAX_SERVERS} sponsored servers.")
                 return
             required_servers = servers
-        finish = datetime.now(UTC) + timedelta(seconds=seconds)
-        draft = Giveaway(
-            message_id=0,
-            guild_id=ctx.guild.id,
-            channel_id=channel.id,
+        await start_giveaway(
+            self.bot,
+            channel=channel,
             winners=winners,
-            members=[],
-            finish=finish,
-            host_id=ctx.author.id,
-            title=title,
-            required_roles=required_roles,
-            ignore_roles=ignore_roles,
-            required_servers=required_servers,
-        )
-        message = await channel.send(view=giveaway_layout(draft))
-        await db.create_giveaway(
-            message_id=message.id,
-            guild_id=ctx.guild.id,
-            channel_id=channel.id,
-            winners=winners,
-            finish=finish,
+            finish=datetime.now(UTC) + timedelta(seconds=seconds),
             host_id=ctx.author.id,
             title=title,
             required_roles=required_roles,

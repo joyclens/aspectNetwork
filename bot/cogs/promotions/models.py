@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from bot.cogs.promotions.constants import (
@@ -12,6 +12,8 @@ from bot.cogs.promotions.constants import (
     MAX_WINNERS,
     MIN_PRIZE_ROBUX,
     PICKER_DAYS,
+    POST_TIME,
+    POST_ZONE,
     SPEED,
 )
 from bot.shared.converters import parse_duration
@@ -26,6 +28,14 @@ _POST_LINK = re.compile(
 )
 _NUMBER = re.compile(r"\d[\d,]*")
 _DATE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
+
+
+def post_time(slot: date) -> datetime:
+    return datetime.combine(slot, POST_TIME, tzinfo=POST_ZONE).astimezone(UTC)
+
+
+def post_day(moment: datetime) -> date:
+    return moment.astimezone(POST_ZONE).date()
 
 
 def suggest_slot(today: date, last_slot: date | None, tier: str) -> date:

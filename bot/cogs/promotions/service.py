@@ -1,19 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import discord
 from discord import ui
 
+from bot.cogs.giveaways import resolve_server, start_giveaway
 from bot.cogs.promotions.constants import (
     AUTO_CLAIM_SINCE,
     ITEMS,
     KIND_ADVERT,
+    KIND_GIVEAWAY,
     KIND_LABELS,
     KINDS,
+    POLL_INTERVAL_SECONDS,
+    POST_ZONE,
     PUSH_BACK_DAYS,
+    REMINDER_BEFORE,
     STATUS_APPROVED,
     STATUS_CLAIMED,
     STATUS_DENIED,
@@ -37,7 +44,9 @@ from bot.cogs.promotions.layouts import (
 from bot.cogs.promotions.models import (
     first_invite_code,
     picker_dates,
+    post_day,
     post_link,
+    post_time,
     suggest_slot,
     upgraded_slot,
 )
@@ -49,7 +58,7 @@ from bot.core.ids import App, Channels, Emojis, Guild, Roles
 from bot.docksys import DockError
 from bot.services.roblox import Sale
 from bot.shared.checks import database, is_management
-from bot.shared.errors import DatabaseUnavailable, report_interaction
+from bot.shared.errors import DatabaseUnavailable, remember_error, report_interaction
 from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")
@@ -57,8 +66,11 @@ logger = logging.getLogger("aspect")
 Interaction = discord.Interaction[Any]
 
 
+EVERYONE = discord.AllowedMentions(everyone=True, users=False, roles=False)
+
+
 def today() -> date:
-    return datetime.now(UTC).date()
+    return datetime.now(POST_ZONE).date()
 
 
 class _QuietReply:
@@ -75,6 +87,9 @@ class PromotionService:
         self._server_names: dict[str, str] = {}
         self._owners: dict[int, int] = {}
         self._reported: set[int] = set()
+        self._scheduled: set[int] = set()
+        self._failed: set[int] = set()
+        self._tasks: set[asyncio.Task[None]] = set()
 
     async def reply(self, interaction: Interaction, text: str) -> None:
         view = container_view(ui.TextDisplay(text))
@@ -609,41 +624,117 @@ class PromotionService:
         if message is None:
             await self.reply(interaction, "I could not find that message.")
             return
-        promotion = await database(self.bot).mark_promotion_posted(
-            promotion_id,
-            message.jump_url,
-        )
-        if promotion is None:
+        current = await database(self.bot).promotion(promotion_id)
+        if current is None or current.status != STATUS_APPROVED:
             await self.reply(interaction, "Only approved submissions can be marked as posted.")
             return
-        await self.publish_log(promotion)
         await self.reply(interaction, "Marked as posted. Closing the ticket.")
-        tickets = self.bot.get_cog("Tickets")
-        if (
-            isinstance(tickets, Tickets)
-            and isinstance(interaction.channel, discord.TextChannel)
-            and interaction.channel.id == promotion.ticket_channel_id
-        ):
-            await tickets.close_ticket(interaction, closed_by=interaction.user.id)
-        await self.dm(promotion.owner_id, live_layout(promotion, message.jump_url))
+        await self.finish_post(promotion_id, message.jump_url, closed_by=interaction.user.id)
 
-    async def alert_due(self) -> None:
-        for promotion in await database(self.bot).due_promotions(today()):
+    async def finish_post(self, promotion_id: int, url: str, *, closed_by: int) -> None:
+        promotion = await database(self.bot).mark_promotion_posted(promotion_id, url)
+        if promotion is None:
+            return
+        logger.info("Promotion #%s posted at %s", promotion.id, url)
+        await self.publish_log(promotion)
+        channel = await self.channel(promotion.ticket_channel_id)
+        tickets = self.bot.get_cog("Tickets")
+        if isinstance(channel, discord.TextChannel) and isinstance(tickets, Tickets):
+            await tickets.close_ticket(
+                SimpleNamespace(channel=channel, guild=channel.guild),
+                closed_by=closed_by,
+            )
+        await self.dm(promotion.owner_id, live_layout(promotion, url))
+
+    def noun(self, promotion: Promotion) -> str:
+        return "giveaway" if promotion.kind == KIND_GIVEAWAY else "advertisement"
+
+    async def schedule_posts(self) -> None:
+        now = datetime.now(UTC)
+        horizon = now + timedelta(seconds=POLL_INTERVAL_SECONDS)
+        db = database(self.bot)
+        for promotion in await db.approved_promotions_until(post_day(horizon + REMINDER_BEFORE)):
+            if promotion.slot is None:
+                continue
+            at = post_time(promotion.slot)
+            if (
+                not promotion.alerted
+                and now < at <= now + REMINDER_BEFORE
+                and await db.mark_promotion_alerted(promotion.id)
+            ):
+                await self.remind(promotion, at)
+            if at > horizon or promotion.id in self._scheduled or promotion.id in self._failed:
+                continue
+            self._scheduled.add(promotion.id)
+            task = asyncio.create_task(self.post_at(promotion.id, at))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+
+    async def remind(self, promotion: Promotion, at: datetime) -> None:
+        await self.alert(
+            promotion,
+            f"<@{promotion.owner_id}> Your {self.noun(promotion)} will be posted "
+            f"{discord.utils.format_dt(at, 'R')} in <#{Channels.community}>. Once it's posted, "
+            "your ticket will be automatically closed and you will be sent the transcript - "
+            "thanks again for purchasing!",
+        )
+
+    async def post_at(self, promotion_id: int, at: datetime) -> None:
+        try:
+            await discord.utils.sleep_until(at)
+            await self.auto_post(promotion_id)
+        except Exception as exc:
+            remember_error(self.bot.traceback, exc, where="Promotion auto post")
+        finally:
+            self._scheduled.discard(promotion_id)
+
+    async def auto_post(self, promotion_id: int) -> None:
+        db = database(self.bot)
+        promotion = await db.claim_promotion_post(promotion_id)
+        if promotion is None:
+            return
+        try:
+            url = await self.publish(promotion)
+        except Exception:
+            logger.exception("Could not auto post promotion #%s", promotion.id)
+            self._failed.add(promotion.id)
+            await db.release_promotion_post(promotion.id)
             await self.alert(
                 promotion,
-                f"<@&{Roles.management}> It's <@{promotion.owner_id}>'s turn! Their "
-                f"**{KIND_LABELS[promotion.kind]}** `#{promotion.id}` is scheduled for "
-                f"{slot_text(promotion.slot)}. Press **Review** for a final check, post it, "
-                "then press **Posted**.",
+                f"<@&{Roles.management}> I could not automatically post "
+                f"**{KIND_LABELS[promotion.kind]}** `#{promotion.id}`. Please post it manually "
+                "and press **Posted**.",
             )
-            await self.dm(
-                promotion.owner_id,
-                notice_layout(
-                    "Posting Today",
-                    f"Your **{KIND_LABELS[promotion.kind]}** `#{promotion.id}` is scheduled "
-                    "to be posted today.",
-                ),
+            return
+        closed_by = self.bot.user.id if self.bot.user is not None else promotion.owner_id
+        await self.finish_post(promotion.id, url, closed_by=closed_by)
+
+    async def publish(self, promotion: Promotion) -> str:
+        channel = await self.channel(Channels.community)
+        if not isinstance(channel, discord.TextChannel):
+            raise RuntimeError("The community channel is unavailable.")
+        data = promotion.data
+        if promotion.kind == KIND_GIVEAWAY:
+            server = await resolve_server(self.bot, str(data["server"]))
+            message = await start_giveaway(
+                self.bot,
+                channel=channel,
+                winners=int(data["winners"]),
+                finish=datetime.now(UTC) + timedelta(seconds=int(data["seconds"])),
+                host_id=promotion.owner_id,
+                title=str(data["prize"]),
+                required_servers=[server] if server is not None else None,
             )
+            await channel.send("@everyone", allowed_mentions=EVERYONE)
+            return message.jump_url
+        text = str(data["text"])
+        content = f"{text}\n\n@everyone"
+        if len(content) <= 2000:
+            message = await channel.send(content, allowed_mentions=EVERYONE)
+        else:
+            message = await channel.send(text, allowed_mentions=EVERYONE)
+            await channel.send("@everyone", allowed_mentions=EVERYONE)
+        return message.jump_url
 
     async def auto_claim(self) -> None:
         sales = [

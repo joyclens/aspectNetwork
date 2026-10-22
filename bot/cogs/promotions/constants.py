@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 ITEM_GIVEAWAY = 134641402925074
 ITEM_ADVERT = 113272473148244
@@ -50,6 +51,9 @@ STATUS_DENIED = "denied"
 STATUS_POSTED = "posted"
 
 POLL_INTERVAL_SECONDS = 60
+POST_ZONE = ZoneInfo("America/New_York")
+POST_TIME = time(15)
+REMINDER_BEFORE = timedelta(minutes=30)
 AUTO_CLAIM_SINCE = datetime(2026, 10, 21, tzinfo=UTC)
 
 SUBMIT_TEMPLATE = r"promotion:submit:(?P<id>\d+)"

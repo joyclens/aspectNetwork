@@ -5,18 +5,21 @@ from typing import Any
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from bot.core.bot import Aspect
 from bot.core.database import GuildTag
 from bot.core.ids import Guild
 from bot.shared.checks import database
 from bot.shared.context import require_context
+from bot.shared.errors import remember_error
 from bot.shared.layout import container_view
 
 logger = logging.getLogger("aspect")
 
 Ctx = commands.Context[Any]
+RECONCILE_MINUTES = 5
+MEMBER_PAGE = 1000
 MAX_ROLES = 10
 MAX_MESSAGE = 2000
 NO_MENTIONS = discord.AllowedMentions.none()
@@ -274,27 +277,95 @@ class GuildTags(commands.Cog):
             return
         if ctx.interaction is not None and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer()
-        roles = self._roles(ctx.guild, row.role_ids)
-        if not roles:
+        if not self._roles(ctx.guild, row.role_ids):
             await ctx.warn("No valid guild tag reward roles are set.")
             return
-        synced = 0
-        failed = 0
-        for member in ctx.guild.members:
-            if member.bot or primary_id(member) != ctx.guild.id:
-                continue
-            missing = [role for role in roles if role not in member.roles]
-            if not missing:
-                continue
-            try:
-                await member.add_roles(*missing, reason="Guild tag sync")
-                synced += 1
-            except discord.HTTPException:
-                failed += 1
-        if failed:
-            await ctx.warn(f"Synced {synced} members; {failed} failed.")
+        result = await self.reconcile_guild(ctx.guild, row, alert=False)
+        if result is None:
+            await ctx.warn("I could not read the member list from Discord.")
             return
-        await ctx.approve(f"Synced guild tag roles for {synced} members.")
+        added, removed = result
+        await ctx.approve(
+            f"Gave the reward roles to {added} members and removed them from {removed}."
+        )
+
+    async def cog_load(self) -> None:
+        self.reconcile.start()
+
+    async def cog_unload(self) -> None:
+        self.reconcile.cancel()
+
+    @tasks.loop(minutes=RECONCILE_MINUTES)
+    async def reconcile(self) -> None:
+        guild = self.bot.get_guild(Guild.id)
+        if guild is None or self.bot.db is None:
+            return
+        row = await self.bot.db.guild_tag(guild.id)
+        if row is None or not row.enabled or not row.role_ids:
+            return
+        await self.reconcile_guild(guild, row, alert=True)
+
+    @reconcile.before_loop
+    async def before_reconcile(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @reconcile.error
+    async def reconcile_error(self, exc: BaseException) -> None:
+        remember_error(self.bot.traceback, exc, where="Guild tag reconcile")
+
+    async def tag_states(self, guild: discord.Guild) -> dict[int, tuple[bool, set[int]]] | None:
+        states: dict[int, tuple[bool, set[int]]] = {}
+        after: int | None = None
+        while True:
+            try:
+                page = await self.bot.http.get_members(guild.id, MEMBER_PAGE, after)
+            except discord.HTTPException:
+                logger.warning("Could not list members for guild tag reconcile")
+                return None
+            for data in page:
+                user = data["user"]
+                if user.get("bot") or "primary_guild" not in user:
+                    continue
+                tag: dict[str, Any] = dict(user.get("primary_guild") or {})
+                wearing = bool(tag.get("identity_enabled")) and str(
+                    tag.get("identity_guild_id")
+                ) == str(guild.id)
+                states[int(user["id"])] = (wearing, {int(role) for role in data["roles"]})
+            if len(page) < MEMBER_PAGE:
+                return states
+            after = int(page[-1]["user"]["id"])
+
+    async def reconcile_guild(
+        self,
+        guild: discord.Guild,
+        row: GuildTag,
+        *,
+        alert: bool,
+    ) -> tuple[int, int] | None:
+        roles = self._roles(guild, row.role_ids)
+        if not roles:
+            return None
+        states = await self.tag_states(guild)
+        if states is None:
+            return None
+        reward_ids = {role.id for role in roles}
+        added = removed = 0
+        for user_id, (wearing, held) in states.items():
+            if wearing == bool(reward_ids & held) and (not wearing or reward_ids <= held):
+                continue
+            member = guild.get_member(user_id)
+            if member is None:
+                continue
+            if wearing:
+                await self._add_roles(member, roles)
+                added += 1
+                if alert and not reward_ids & held:
+                    await self._alert(member, row)
+            else:
+                await self._remove_roles(member, roles)
+                removed += 1
+        logger.info("Guild tag reconcile: added %s, removed %s", added, removed)
+        return added, removed
 
     @commands.Cog.listener()
     async def on_user_update(self, before: discord.User, after: discord.User) -> None:
