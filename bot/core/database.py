@@ -1285,28 +1285,6 @@ class Database:
             json.dumps(role_ids),
         )
 
-
-def _sticky(row: Any) -> StickyMessage:
-    return StickyMessage(
-        channel_id=int(row["channel_id"]),
-        guild_id=int(row["guild_id"]),
-        message=str(row["message"]),
-        last_message_id=(
-            int(row["last_message_id"]) if row["last_message_id"] is not None else None
-        ),
-        keep_old=bool(row["keep_old"]),
-    )
-
-
-def _guild_tag(row: Any) -> GuildTag:
-    return GuildTag(
-        guild_id=int(row["guild_id"]),
-        enabled=bool(row["enabled"]),
-        channel_id=int(row["channel_id"]) if row["channel_id"] is not None else None,
-        message=str(row["message"] or ""),
-        role_ids=_ids(row["role_ids"]) or [],
-    )
-
     async def unclaimed_sales(
         self,
         group_id: int,
@@ -1625,6 +1603,28 @@ def _guild_tag(row: Any) -> GuildTag:
             "SELECT MAX(slot) FROM promotions WHERE status = 'approved'"
         )
         return value if isinstance(value, date) else None
+
+
+def _sticky(row: Any) -> StickyMessage:
+    return StickyMessage(
+        channel_id=int(row["channel_id"]),
+        guild_id=int(row["guild_id"]),
+        message=str(row["message"]),
+        last_message_id=(
+            int(row["last_message_id"]) if row["last_message_id"] is not None else None
+        ),
+        keep_old=bool(row["keep_old"]),
+    )
+
+
+def _guild_tag(row: Any) -> GuildTag:
+    return GuildTag(
+        guild_id=int(row["guild_id"]),
+        enabled=bool(row["enabled"]),
+        channel_id=int(row["channel_id"]) if row["channel_id"] is not None else None,
+        message=str(row["message"] or ""),
+        role_ids=_ids(row["role_ids"]) or [],
+    )
 
 
 async def connect(dsn: str) -> tuple[Database, str]:

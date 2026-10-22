@@ -43,7 +43,7 @@ from bot.cogs.tickets import Tickets
 from bot.core.bot import Aspect
 from bot.core.database import Promotion
 from bot.core.ids import App, Channels, Emojis, Guild, Roles
-from bot.services.dock import DockError
+from bot.docksys import DockError
 from bot.services.roblox import Sale
 from bot.shared.checks import database, is_management
 from bot.shared.errors import DatabaseUnavailable, report_interaction

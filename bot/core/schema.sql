@@ -156,3 +156,53 @@ CREATE TABLE IF NOT EXISTS package_reports (
 
 CREATE INDEX IF NOT EXISTS package_reports_cooldown_idx
     ON package_reports (package_id, reporter_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS sticky_messages (
+    channel_id BIGINT PRIMARY KEY,
+    guild_id BIGINT NOT NULL,
+    message TEXT NOT NULL,
+    last_message_id BIGINT,
+    keep_old BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS sticky_messages_guild_idx
+    ON sticky_messages (guild_id);
+
+CREATE TABLE IF NOT EXISTS guild_tags (
+    guild_id BIGINT PRIMARY KEY,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    channel_id BIGINT,
+    message TEXT NOT NULL DEFAULT '',
+    role_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS promotions (
+    id BIGSERIAL PRIMARY KEY,
+    kind TEXT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    roblox_id BIGINT NOT NULL,
+    transaction_id BIGINT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'claimed',
+    tier TEXT NOT NULL DEFAULT 'normal',
+    data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    log_message_id BIGINT,
+    ticket_channel_id BIGINT,
+    slot DATE,
+    alerted BOOLEAN NOT NULL DEFAULT FALSE,
+    post_url TEXT,
+    reviewer_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    approved_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS promotions_owner_idx ON promotions (owner_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS promotions_status_slot_idx ON promotions (status, slot);
+CREATE INDEX IF NOT EXISTS promotions_roblox_idx ON promotions (roblox_id);
+
+CREATE TABLE IF NOT EXISTS promotion_claims (
+    transaction_id BIGINT PRIMARY KEY,
+    item_id BIGINT NOT NULL,
+    owner_id BIGINT NOT NULL,
+    promotion_id BIGINT REFERENCES promotions (id),
+    claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
