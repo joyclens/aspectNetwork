@@ -23,9 +23,9 @@ NO_MENTIONS = discord.AllowedMentions.none()
 USER_MENTIONS = discord.AllowedMentions(users=True)
 
 
-def primary_id(member: discord.Member) -> int | None:
-    guild = member.primary_guild
-    return guild.id if guild is not None else None
+def primary_id(user: discord.User | discord.Member) -> int | None:
+    guild = user.primary_guild
+    return guild.id if guild.identity_enabled else None
 
 
 def format_alert(template: str, member: discord.Member) -> str:
@@ -63,7 +63,7 @@ class GuildTags(commands.Cog):
         await ctx.send(
             view=container_view(
                 discord.ui.TextDisplay(
-                    "## Guild tag\n"
+                    "## Guild Tag\n"
                     f"**Enabled:** `{'yes' if row.enabled else 'no'}`\n"
                     f"**Channel:** {channel}\n"
                     f"**Roles:** {roles}\n"
@@ -297,28 +297,33 @@ class GuildTags(commands.Cog):
         await ctx.approve(f"Synced guild tag roles for {synced} members.")
 
     @commands.Cog.listener()
-    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
-        if after.guild.id != Guild.id or after.bot:
+    async def on_user_update(self, before: discord.User, after: discord.User) -> None:
+        if after.bot:
+            return
+        guild = self.bot.get_guild(Guild.id)
+        if guild is None:
             return
         before_id = primary_id(before)
         after_id = primary_id(after)
-        if before_id == after_id:
+        if before_id == after_id or Guild.id not in (before_id, after_id):
             return
-        if self.bot.db is None:
+        member = guild.get_member(after.id)
+        if member is None or self.bot.db is None:
             return
-        row = await self.bot.db.guild_tag(after.guild.id)
+        logger.info("Member %s guild tag changed %s -> %s", member.id, before_id, after_id)
+        row = await self.bot.db.guild_tag(guild.id)
         if row is None or not row.enabled or not row.role_ids:
+            logger.info("Guild tag rewards are not configured, skipping %s", member.id)
             return
-        roles = self._roles(after.guild, row.role_ids)
+        roles = self._roles(guild, row.role_ids)
         if not roles:
+            logger.warning("Guild tag reward roles %s no longer exist", row.role_ids)
             return
-        guild_id = after.guild.id
-        if before_id == guild_id and after_id != guild_id:
-            await self._remove_roles(after, roles)
+        if after_id != Guild.id:
+            await self._remove_roles(member, roles)
             return
-        if before_id != guild_id and after_id == guild_id:
-            await self._add_roles(after, roles)
-            await self._alert(after, row)
+        await self._add_roles(member, roles)
+        await self._alert(member, row)
 
     async def _require_enabled(self, ctx: Ctx) -> GuildTag | None:
         reply = require_context(ctx)
